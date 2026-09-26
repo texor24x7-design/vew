@@ -25,6 +25,8 @@
     "electron-vite": "^5.0.0",
     "eslint": "^10.11.0",
     "eslint-plugin-react-hooks": "^7.1.1",
+    "lucide-react": "^1.48.0",
+    "motion": "^13.4.4",
     "prettier": "^3.9.9",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

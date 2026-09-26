@@ -1,0 +1,27 @@
+import { contextBridge, ipcRenderer } from 'electron'
+import { IPC, type BrowserState, type Command, type FocusUrl } from '../shared/ipc'
+
+// Cache the latest state so a late subscriber (React mounts after the first push) still gets it.
+let state: BrowserState = { tabs: [], activeId: null }
+const stateListeners = new Set<(s: BrowserState) => void>()
+ipcRenderer.on(IPC.state, (_e, s: BrowserState) => {
+  state = s
+  stateListeners.forEach((cb) => cb(s))
+})
+
+const api = {
+  send: (cmd: Command): void => ipcRenderer.send(IPC.command, cmd),
+  onState: (cb: (s: BrowserState) => void): (() => void) => {
+    stateListeners.add(cb)
+    cb(state)
+    return () => stateListeners.delete(cb)
+  },
+  onFocusUrl: (cb: (f: FocusUrl) => void): (() => void) => {
+    const listener = (_e: unknown, f: FocusUrl): void => cb(f)
+    ipcRenderer.on(IPC.focusUrl, listener)
+    return () => ipcRenderer.off(IPC.focusUrl, listener)
+  }
+}
+
+export type VewApi = typeof api
+contextBridge.exposeInMainWorld('vew', api)

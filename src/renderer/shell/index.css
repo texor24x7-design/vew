@@ -17,3 +17,33 @@ body,
   user-select: none;
   -webkit-app-region: drag;
 }
+
+button,
+input,
+li {
+  -webkit-app-region: no-drag;
+}
+
+/* Loading state: a thin light sweep across the tab row. */
+.shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.45), transparent);
+  animation: shimmer 1.2s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shimmer::after {
+    animation: none;
+    opacity: 0.5;
+  }
+}

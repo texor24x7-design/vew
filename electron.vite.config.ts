@@ -5,6 +5,7 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   main: {},
+  preload: {},
   renderer: {
     root: 'src/renderer/shell',
     build: { rollupOptions: { input: resolve(__dirname, 'src/renderer/shell/index.html') } },
