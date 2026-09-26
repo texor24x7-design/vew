@@ -1,8 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC, type BrowserState, type Command, type FocusUrl } from '../shared/ipc'
+import { EMPTY_STATE, IPC, type BrowserState, type Command, type FocusUrl } from '../shared/ipc'
 
 // Cache the latest state so a late subscriber (React mounts after the first push) still gets it.
-let state: BrowserState = { tabs: [], activeId: null }
+let state: BrowserState = EMPTY_STATE
 const stateListeners = new Set<(s: BrowserState) => void>()
 ipcRenderer.on(IPC.state, (_e, s: BrowserState) => {
   state = s

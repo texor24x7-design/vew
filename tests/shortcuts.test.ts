@@ -26,6 +26,7 @@ for (const [platform, mod] of [
     expect(shortcutFor(key('r', m), platform)).toEqual({ type: 'reload' })
     expect(shortcutFor(key('[', m), platform)).toEqual({ type: 'back' })
     expect(shortcutFor(key(']', m), platform)).toEqual({ type: 'forward' })
+    expect(shortcutFor(key('s', m), platform)).toEqual({ type: 'toggleSidebar' })
     expect(shortcutFor(key('T', { ...m, shift: true }), platform)).toEqual({ type: 'reopen' })
     expect(shortcutFor(key('3', m), platform)).toEqual({ type: 'select', index: 2 })
     expect(shortcutFor(key('9', m), platform)).toEqual({ type: 'select', index: -1 })

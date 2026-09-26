@@ -18,6 +18,8 @@ export function shortcutFor(
   switch (key) {
     case 't':
       return { type: 'focusUrl', newTab: true }
+    case 's':
+      return { type: 'toggleSidebar' }
     case 'l':
       return { type: 'focusUrl', newTab: false }
     case 'w':

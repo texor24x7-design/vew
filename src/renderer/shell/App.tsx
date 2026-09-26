@@ -1,65 +1,131 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
-import { AnimatePresence, MotionConfig, motion } from 'motion/react'
-import { ArrowLeft, ArrowRight, Globe, Plus, RotateCw, X } from 'lucide-react'
-import type { BrowserState, TabState } from '../../shared/ipc'
-import { PAGE_INSET, PAGE_RADIUS, SIDEBAR_WIDTH, pageTop } from '../../shared/layout'
+import { MotionConfig, motion } from 'motion/react'
+import { Archive, ArrowLeft, ArrowRight, PanelLeft, RotateCw, X } from 'lucide-react'
+import { EMPTY_STATE, type BrowserState, type TabState } from '../../shared/ipc'
+import { PAGE_INSET, PAGE_RADIUS, SIDEBAR_DEFAULT_WIDTH, pageTop } from '../../shared/layout'
 import { displayHost } from '../../shared/url'
+import { ArchiveList, Tabs, findNode, icon } from './Sidebar'
 
 const platform = new URLSearchParams(location.search).get('platform') ?? ''
 const isMac = platform === 'darwin'
 const MOD = isMac ? '⌘' : 'Ctrl+'
 const { send } = window.vew
-const icon = { size: 16, strokeWidth: 1.5 }
 const spring = { type: 'spring', stiffness: 500, damping: 40 } as const
 
 export default function App(): React.JSX.Element {
-  const [state, setState] = useState<BrowserState>({ tabs: [], activeId: null })
+  const [state, setState] = useState<BrowserState>(EMPTY_STATE)
   useEffect(() => window.vew.onState(setState), [])
-  const active = state.tabs.find((t) => t.id === state.activeId)
+  const [showArchive, setShowArchive] = useState(false)
+  const { sidebar } = state
+  const found =
+    state.activeId === null
+      ? null
+      : findNode([...state.favorites, ...state.pinned, ...state.today], state.activeId)
+  const active = found?.kind === 'tab' ? found : undefined
+  const hidden = sidebar.collapsed && !sidebar.peek
+  // Mirrors pageBounds() in main so the shadow sits exactly under the native page card.
+  const left = sidebar.collapsed ? 0 : sidebar.width
+  const cardX = (sidebar.collapsed && sidebar.peek ? sidebar.width : left) + PAGE_INSET
 
   return (
     <MotionConfig reducedMotion="user" transition={spring}>
       <div className="relative h-full text-[13px] text-neutral-800 dark:text-neutral-100">
-        <aside className="flex h-full flex-col gap-2 px-2" style={{ width: SIDEBAR_WIDTH }}>
-          <NavRow active={active} />
-          <UrlPill active={active} />
-          <button
-            className="flex h-8 items-center gap-2 rounded-lg px-2 text-neutral-500 hover:bg-black/5 dark:text-neutral-400 dark:hover:bg-white/10"
-            onClick={() => window.dispatchEvent(new CustomEvent('vew:new-tab'))}
-          >
-            <Plus {...icon} />
-            New Tab
-          </button>
-          <div className="mx-2 h-px bg-black/10 dark:bg-white/10" />
-          <ul className="-mx-2 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2 pb-2">
-            <AnimatePresence initial={false}>
-              {state.tabs.map((tab) => (
-                <TabRow key={tab.id} tab={tab} active={tab.id === state.activeId} />
-              ))}
-            </AnimatePresence>
-          </ul>
-        </aside>
         {/* Soft shadow under the native page card, which Chromium paints on top of this. */}
         <div
           className="absolute grid place-items-center bg-white text-neutral-400 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_8px_24px_rgba(0,0,0,0.08)] dark:bg-neutral-900 dark:text-neutral-500"
           style={{
-            left: SIDEBAR_WIDTH + PAGE_INSET,
+            left: cardX,
             top: pageTop(platform),
-            right: PAGE_INSET,
+            width: `calc(100% - ${left + 2 * PAGE_INSET}px)`,
             bottom: PAGE_INSET,
             borderRadius: PAGE_RADIUS
           }}
         >
           {!active && `Press ${MOD}T to open a tab`}
         </div>
+        <motion.aside
+          initial={false}
+          animate={{ x: hidden ? -(sidebar.width + PAGE_INSET) : 0 }}
+          transition={{ duration: 0.18, ease: 'easeOut' }}
+          className="absolute inset-y-0 left-0 flex flex-col gap-2 px-2"
+          style={{ width: sidebar.width }}
+          onMouseLeave={() => {
+            // Keep a peeked sidebar open while the user is typing in it.
+            if (sidebar.peek && document.activeElement?.tagName !== 'INPUT')
+              send({ type: 'sidebar', peek: false })
+          }}
+        >
+          <NavRow active={active} />
+          <UrlPill active={active} collapsed={sidebar.collapsed} />
+          {showArchive ? (
+            <>
+              <h2 className="px-2 pt-1 text-[12px] font-medium text-neutral-500 dark:text-neutral-400">
+                Archive
+              </h2>
+              <ArchiveList items={state.archive} />
+            </>
+          ) : (
+            <Tabs
+              state={state}
+              onNewTab={() => window.dispatchEvent(new CustomEvent('vew:new-tab'))}
+            />
+          )}
+          <div className="flex h-10 shrink-0 items-center justify-between">
+            <button
+              className={`${iconButton} ${showArchive ? 'bg-black/5 dark:bg-white/10' : ''}`}
+              aria-label={showArchive ? 'Back to tabs' : 'Show archive'}
+              aria-pressed={showArchive}
+              title="Archive"
+              onClick={() => setShowArchive(!showArchive)}
+            >
+              <Archive {...icon} />
+            </button>
+            <button
+              className={iconButton}
+              aria-label="Toggle sidebar"
+              title={`Toggle sidebar (${MOD}S)`}
+              onClick={() => send({ type: 'toggleSidebar' })}
+            >
+              <PanelLeft {...icon} />
+            </button>
+          </div>
+        </motion.aside>
+        {!sidebar.collapsed && <ResizeHandle width={sidebar.width} />}
+        {hidden && (
+          <div
+            className="no-drag absolute inset-y-0 left-0 w-2"
+            onMouseEnter={() => send({ type: 'sidebar', peek: true })}
+          />
+        )}
       </div>
     </MotionConfig>
   )
 }
 
+/** Drag the gap between sidebar and page to resize; double-click resets. */
+function ResizeHandle({ width }: { width: number }): React.JSX.Element {
+  const frame = useRef(0)
+  return (
+    <div
+      className="no-drag absolute inset-y-0 w-2 cursor-col-resize"
+      style={{ left: width }}
+      onPointerDown={(e) => e.currentTarget.setPointerCapture(e.pointerId)}
+      onPointerMove={(e) => {
+        if (!e.currentTarget.hasPointerCapture(e.pointerId)) return
+        const x = e.clientX
+        cancelAnimationFrame(frame.current)
+        frame.current = requestAnimationFrame(() => send({ type: 'sidebar', width: x }))
+      }}
+      onDoubleClick={() => send({ type: 'sidebar', width: SIDEBAR_DEFAULT_WIDTH })}
+    />
+  )
+}
+
+const iconButton =
+  'grid size-7 place-items-center rounded-md text-neutral-500 hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-400 dark:hover:bg-white/10'
+
 function NavRow({ active }: { active?: TabState }): React.JSX.Element {
-  const button =
-    'grid size-7 place-items-center rounded-md text-neutral-500 hover:bg-black/5 disabled:opacity-40 disabled:hover:bg-transparent dark:text-neutral-400 dark:hover:bg-white/10'
+  const button = iconButton
   return (
     // Leaves room for the macOS traffic lights.
     <div className={`flex h-11 shrink-0 items-end justify-end gap-0.5 ${isMac ? 'pl-20' : ''}`}>
@@ -91,7 +157,13 @@ function NavRow({ active }: { active?: TabState }): React.JSX.Element {
   )
 }
 
-function UrlPill({ active }: { active?: TabState }): React.JSX.Element {
+function UrlPill({
+  active,
+  collapsed
+}: {
+  active?: TabState
+  collapsed: boolean
+}): React.JSX.Element {
   const input = useRef<HTMLInputElement>(null)
   // Refs mirror the mode synchronously: begin() calls focus(), whose handler runs before React re-renders.
   const newTab = useRef(false)
@@ -109,9 +181,11 @@ function UrlPill({ active }: { active?: TabState }): React.JSX.Element {
   }
   // Not left to onBlur alone: blur never fires while the window itself is unfocused.
   const end = (): void => {
+    if (!editingNow.current) return
     editingNow.current = false
     setEditing(false)
     input.current?.blur()
+    if (collapsed) send({ type: 'sidebar', peek: false })
   }
   const beginFromEvent = useEffectEvent(begin)
   useEffect(() => window.vew.onFocusUrl(({ newTab }) => beginFromEvent(newTab)), [])
@@ -141,41 +215,5 @@ function UrlPill({ active }: { active?: TabState }): React.JSX.Element {
         }
       }}
     />
-  )
-}
-
-function TabRow({ tab, active }: { tab: TabState; active: boolean }): React.JSX.Element {
-  return (
-    <motion.li
-      layout
-      initial={{ opacity: 0, height: 0 }}
-      animate={{ opacity: 1, height: 32 }}
-      exit={{ opacity: 0, height: 0 }}
-      className={`group relative flex shrink-0 cursor-default items-center gap-2 overflow-hidden rounded-lg px-2 ${
-        active
-          ? 'bg-white/80 shadow-sm dark:bg-white/15'
-          : 'hover:bg-black/5 dark:hover:bg-white/10'
-      } ${tab.loading ? 'shimmer' : ''}`}
-      onClick={() => send({ type: 'activate', id: tab.id })}
-      onAuxClick={(e) => e.button === 1 && send({ type: 'close', id: tab.id })}
-      title={tab.title}
-    >
-      {tab.favicon ? (
-        <img src={tab.favicon} alt="" className="size-4 shrink-0 rounded-sm" draggable={false} />
-      ) : (
-        <Globe {...icon} className="shrink-0 text-neutral-400" />
-      )}
-      <span className="min-w-0 flex-1 truncate">{tab.title}</span>
-      <button
-        className="grid size-5 shrink-0 place-items-center rounded text-neutral-500 opacity-0 group-hover:opacity-100 hover:bg-black/10 dark:hover:bg-white/15"
-        aria-label="Close tab"
-        onClick={(e) => {
-          e.stopPropagation()
-          send({ type: 'close', id: tab.id })
-        }}
-      >
-        <X size={14} strokeWidth={1.5} />
-      </button>
-    </motion.li>
   )
 }

@@ -20,7 +20,9 @@ body,
 
 button,
 input,
-li {
+li,
+[role='button'],
+.no-drag {
   -webkit-app-region: no-drag;
 }
 
