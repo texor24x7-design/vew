@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import texorIcon from '../../../resources/texor/accounts.png'
+import vewMark from '../../../resources/vew-mark.svg'
 import type { Account, SettingsView, WelcomeState } from '../../shared/ipc'
 import { PRESETS } from '../../shared/theme'
 import { button, call, muted } from './api'
@@ -139,7 +139,7 @@ function SignInStep(props: {
   const { account } = props
   return (
     <section aria-labelledby="step-title">
-      <img src={texorIcon} alt="" className="mb-6 size-14 rounded-2xl" />
+      <img src={vewMark} alt="Vew" className="mb-6 size-16" />
       <h1 id="step-title" className="mb-2 text-3xl font-semibold">
         {account ? `Welcome, ${account.name.split(' ')[0]}` : 'Welcome to Vew'}
       </h1>

@@ -294,6 +294,7 @@ export class VewWindow {
           }
         : {
             titleBarStyle: 'hidden',
+            icon: join(__dirname, '../../resources/icon.png'),
             titleBarOverlay: {
               color: '#00000000',
               symbolColor: '#6b7280',

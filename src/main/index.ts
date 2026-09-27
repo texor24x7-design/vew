@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { app, BrowserWindow, nativeTheme, session } from 'electron'
 import { loadBlocker } from './adblock'
 import { registerInternalScheme, serveInternalPages } from './internal'
@@ -53,6 +54,8 @@ if (!app.requestSingleInstanceLock()) {
     console.log(
       `Vew — Chromium ${process.versions.chrome}, Electron ${process.versions.electron}, ${process.platform}`
     )
+    // Packaged builds carry the icon in the app bundle; in development the Dock would show Electron's.
+    if (!app.isPackaged) app.dock?.setIcon(join(__dirname, '../../resources/icon.png'))
     settings.load()
     const applyAppearance = (): void => {
       nativeTheme.themeSource = settings.get().appearance
