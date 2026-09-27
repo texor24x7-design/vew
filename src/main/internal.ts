@@ -1,12 +1,25 @@
 import { join, normalize } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, session } from 'electron'
-import { IPC, isInternalRequest, type InternalRequest, type SettingsView } from '../shared/ipc'
+import {
+  IPC,
+  isInternalRequest,
+  type InternalRequest,
+  type SettingsView,
+  type WelcomeState
+} from '../shared/ipc'
+import {
+  BROWSER_IDS,
+  detectSources,
+  importHistory,
+  readBookmarks,
+  type ImportedFolder
+} from './importer'
 import { installFromStore, listExtensions, loadUnpacked, removeExtension } from './extensions'
 import { history } from './history'
 import { settings } from './settings'
 
-export const INTERNAL_PAGES = ['history', 'settings'] as const
+export const INTERNAL_PAGES = ['history', 'settings', 'welcome'] as const
 export const isInternalUrl = (url: string): boolean => url.startsWith('vew://')
 
 /** Must run before the app is ready. */
@@ -20,7 +33,17 @@ export function registerInternalScheme(): void {
  * Internal pages (vew://history, vew://settings) are Vew's own UI: they live in the default session, which no
  * website uses (web tabs run in profile partitions), and only they can reach the internal IPC below.
  */
-export function serveInternalPages(openUrl: (url: string) => void): void {
+/** What internal pages may ask of the browser window. */
+export interface InternalHooks {
+  openUrl: (url: string) => void
+  /** Theme colors of the active Space (read) / set them (onboarding). */
+  colors: () => string[]
+  setColors: (colors: string[]) => void
+  importBookmarks: (folder: ImportedFolder) => number
+  finishWelcome: () => void
+}
+
+export function serveInternalPages(hooks: InternalHooks): void {
   const root = join(__dirname, '../renderer')
   session.defaultSession.protocol.handle('vew', (req) => {
     const { host, pathname } = new URL(req.url)
@@ -44,11 +67,11 @@ export function serveInternalPages(openUrl: (url: string) => void): void {
     ) {
       throw new Error('not allowed')
     }
-    return handle(req, openUrl)
+    return handle(req, hooks)
   })
 }
 
-async function handle(req: InternalRequest, openUrl: (url: string) => void): Promise<unknown> {
+async function handle(req: InternalRequest, hooks: InternalHooks): Promise<unknown> {
   switch (req.method) {
     case 'historySearch':
       return history().search(req.query, req.limit, req.before)
@@ -78,7 +101,25 @@ async function handle(req: InternalRequest, openUrl: (url: string) => void): Pro
       app.setAsDefaultProtocolClient('https')
       return settingsView()
     case 'open':
-      return openUrl(req.url)
+      return hooks.openUrl(req.url)
+    case 'welcomeState':
+      return {
+        sources: detectSources(),
+        colors: hooks.colors(),
+        isDefaultBrowser: app.isDefaultProtocolClient('https')
+      } satisfies WelcomeState
+    case 'setColors':
+      return hooks.setColors(req.colors)
+    case 'import': {
+      if (!BROWSER_IDS.includes(req.source)) throw new Error('Unknown browser')
+      const folder = req.bookmarks ? readBookmarks(req.source) : null
+      return {
+        bookmarks: folder ? hooks.importBookmarks(folder) : 0,
+        history: req.history ? importHistory(req.source) : 0
+      }
+    }
+    case 'welcomeDone':
+      return hooks.finishWelcome()
     case 'extList':
       return listExtensions()
     case 'extInstall':

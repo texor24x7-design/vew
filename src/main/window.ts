@@ -48,6 +48,8 @@ import {
 import { PRESETS } from '../shared/theme'
 import { toUrl, type SearchEngine } from '../shared/url'
 import { blockedOn, blockerEvents, resetBlocked } from './adblock'
+import { tabsToDiscard } from './discard'
+import type { ImportedBookmark, ImportedFolder } from './importer'
 import { clearDownloads, downloadAction, downloadList, downloads } from './downloads'
 import { history } from './history'
 import {
@@ -85,7 +87,7 @@ export const secureWebPreferences = {
   sandbox: true,
   nodeIntegration: false
 }
-const HOME_URL = 'https://www.google.com'
+const WELCOME_URL = 'vew://welcome/'
 const engine = (): SearchEngine => settings.get().searchEngine
 const ENGINE_NAMES: Record<SearchEngine, string> = {
   google: 'Google',
@@ -206,6 +208,8 @@ export class VewWindow {
   /** The find bar is showing (the overlay shrinks to just the bar, so the page stays usable). */
   private findOpen = false
   private pushTimer?: NodeJS.Timeout
+  /** Where the user last put keyboard focus; restored whenever the window is activated. */
+  private focusTarget: 'page' | 'sidebar' = 'page'
   /** An extension's toolbar popup, floating under its icon. */
   private popup: {
     view: WebContentsView
@@ -302,11 +306,20 @@ export class VewWindow {
     ipcMain.handle(IPC.suggest, (e, query: unknown) =>
       e.sender === overlay && typeof query === 'string' && query.length <= 200 ? suggest(query) : []
     )
-    shell.on('before-input-event', (e, input) => this.onInput(e, input))
+    shell.on('before-input-event', (e, input) => this.onInput(e, input, 'sidebar'))
+    shell.on('before-mouse-event', (_e, mouse) => {
+      if (mouse.type === 'mouseDown') this.focusTarget = 'sidebar'
+    })
+    // On activation Chromium focuses the shell's first focusable control (e.g. the address field, which
+    // then selects its text). Put focus back where the user had it instead.
+    this.win.on('focus', () => setImmediate(() => this.restoreFocus()))
     shell.on('did-finish-load', () => this.push())
     this.win.on('resize', () => this.layout())
     this.win.once('ready-to-show', () => this.win.show())
-    const archiveTimer = setInterval(() => this.archiveIdle(), ARCHIVE_CHECK_MS)
+    const archiveTimer = setInterval(() => {
+      this.archiveIdle()
+      this.discardIdle()
+    }, ARCHIVE_CHECK_MS)
     this.win.on('closed', () => {
       ipcMain.off(IPC.command, onCommand)
       ipcMain.removeHandler(IPC.suggest)
@@ -329,7 +342,8 @@ export class VewWindow {
     loadPage(overlay, 'overlay', query)
     this.updateTrafficLights()
     this.archiveIdle()
-    if (!saved) this.openTab(HOME_URL, { activate: true })
+    // First run: onboarding instead of a blank start.
+    if (!saved) this.openTab(WELCOME_URL, { activate: true, title: 'Welcome to Vew' })
     else if (this.activeId !== null) this.activate(this.activeId)
   }
 
@@ -365,6 +379,60 @@ export class VewWindow {
       if (loc) return { loc, space }
     }
     return null
+  }
+
+  spaceColors(): string[] {
+    return this.space.theme.colors
+  }
+
+  setSpaceColors(colors: string[]): void {
+    this.updateSpace({
+      type: 'updateSpace',
+      id: this.space.id,
+      theme: { ...this.space.theme, colors }
+    })
+  }
+
+  /** An imported browser's bookmarks become one collapsed pinned folder (with subfolders) in this Space. */
+  importBookmarks(folder: ImportedFolder): number {
+    const now = Date.now()
+    const tab = (b: ImportedBookmark): Tab => ({
+      kind: 'tab',
+      id: newId(),
+      url: b.url,
+      title: b.title,
+      loading: false,
+      profileId: this.space.profileId,
+      lastActive: now,
+      view: null
+    })
+    const children: Node[] = [
+      ...folder.folders.map((f): Folder => ({
+        kind: 'folder',
+        id: newId(),
+        name: f.name,
+        open: false,
+        children: f.bookmarks.map(tab)
+      })),
+      ...folder.bookmarks.map(tab)
+    ]
+    if (!children.length) return 0
+    this.space.pinned.push({
+      kind: 'folder',
+      id: newId(),
+      name: folder.name,
+      open: false,
+      children
+    })
+    this.push()
+    return folder.bookmarks.length + folder.folders.reduce((n, f) => n + f.bookmarks.length, 0)
+  }
+
+  /** Close the welcome tab and open the command bar, ready to go. */
+  finishWelcome(): void {
+    const welcome = this.allTabs().find((t) => t.url.startsWith(WELCOME_URL))
+    if (welcome) this.closeTab(welcome.id)
+    this.openPalette()
   }
 
   /** Profile new pages should use: the active Space's. */
@@ -690,7 +758,10 @@ export class VewWindow {
     this.zones.today.splice(openerIndex + 1, 0, tab)
     if (opts.webContents) this.createView(tab, opts.webContents)
     if (opts.activate) this.activate(tab.id)
-    else this.push()
+    else {
+      this.discardIdle()
+      this.push()
+    }
     return tab
   }
 
@@ -777,6 +848,7 @@ export class VewWindow {
     wc.on('before-input-event', (e, input) => this.onInput(e, input))
     // Clicking into a split pane makes it the active tab (the URL pill and shortcuts follow it).
     wc.on('before-mouse-event', (_e, mouse) => {
+      if (mouse.type === 'mouseDown') this.focusTarget = 'page'
       if (mouse.type !== 'mouseDown' || tab.id === this.activeId || !this.shown.includes(view))
         return
       this.activeId = tab.id
@@ -841,8 +913,37 @@ export class VewWindow {
       inIsolation(node.view.webContents, PIP_EXIT)
       tabActivated(node.view.webContents)
     }
-    if (!this.paletteOpen && !this.peek) node.view?.webContents.focus()
+    if (!this.paletteOpen && !this.peek) {
+      this.focusTarget = 'page'
+      node.view?.webContents.focus()
+    }
+    this.discardIdle()
     this.push()
+  }
+
+  /** Free memory: unload idle and least-recently-used background tabs (they reload when opened). */
+  private discardIdle(): void {
+    const visible = new Set(this.shown)
+    const tabs = this.allTabs()
+    const ids = tabsToDiscard(
+      tabs.map((t) => {
+        const wc = t.view?.webContents as WebContents | undefined
+        const live = wc && !wc.isDestroyed()
+        return {
+          id: t.id,
+          lastActive: t.lastActive,
+          loaded: Boolean(live),
+          visible: Boolean(t.view && visible.has(t.view)),
+          busy: Boolean(
+            live && (wc.isCurrentlyAudible() || wc.isDevToolsOpened() || wc.isBeingCaptured())
+          )
+        }
+      }),
+      Date.now()
+    )
+    if (!ids.length) return
+    for (const t of tabs) if (ids.includes(t.id)) this.unload(t)
+    this.schedulePush()
   }
 
   private applyZoom(wc: WebContents, url: string): void {
@@ -1013,10 +1114,13 @@ export class VewWindow {
       this.activeId = null
       // Closing a split pane keeps the rest of the split on screen.
       if (sibling !== undefined) return this.activate(sibling)
-      // Fall back to the most recently used tab that is still loaded.
-      const next = tabsInOrder(this.zones)
-        .filter((t) => t.view)
-        .sort((a, b) => b.lastActive - a.lastActive)[0]
+      // Fall back to the most recently used tab that's still loaded; if discarding unloaded them all,
+      // the most recent Today tab (it reloads) rather than an empty page.
+      const byRecent = (list: Tab[]): Tab | undefined =>
+        [...list].sort((a, b) => b.lastActive - a.lastActive)[0]
+      const next =
+        byRecent(tabsInOrder(this.zones).filter((t) => t.view)) ??
+        byRecent(onlyTabs(this.zones.today))
       if (next) return this.activate(next.id)
     }
     this.push()
@@ -1232,16 +1336,37 @@ export class VewWindow {
     Menu.buildFromTemplate(items).popup({ window: this.win })
   }
 
-  private onInput(e: Event, input: Input): void {
+  /** Keyboard shortcuts from any of Vew's views; `from` says which side the key was pressed on. */
+  private onInput(e: Event, input: Input, from: 'sidebar' | 'page' = 'page'): void {
     const shortcut = shortcutFor(input, process.platform)
     if (!shortcut) return
     e.preventDefault()
+    if (shortcut.type === 'cycleFocus') {
+      const page = this.active()?.view?.webContents
+      if (from === 'sidebar' && page) {
+        this.focusTarget = 'page'
+        return page.focus()
+      }
+      this.focusTarget = 'sidebar'
+      if (this.sidebar.collapsed) this.run({ type: 'sidebar', peek: true })
+      this.win.webContents.focus()
+      return this.win.webContents.send(IPC.focusSidebar)
+    }
     if (shortcut.type !== 'focusUrl') return this.run(shortcut)
     if (this.paletteOpen) this.closePalette()
     // The URL pill lives in the sidebar, so reveal it while typing.
     if (this.sidebar.collapsed) this.run({ type: 'sidebar', peek: true })
+    this.focusTarget = 'sidebar'
     this.win.webContents.focus()
     this.win.webContents.send(IPC.focusUrl)
+  }
+
+  private restoreFocus(): void {
+    if (this.disposed) return
+    if (this.paletteOpen || this.findOpen) return this.overlay.webContents.focus()
+    if (this.popup) return this.popup.view.webContents.focus()
+    if (this.peek) return this.peek.view.webContents.focus()
+    if (this.focusTarget === 'page') this.active()?.view?.webContents.focus()
   }
 
   private toast(message: string): void {

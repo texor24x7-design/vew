@@ -1,7 +1,7 @@
 import type { Input } from 'electron'
 import type { Command } from '../shared/ipc'
 
-export type Shortcut = Command | { type: 'focusUrl' }
+export type Shortcut = Command | { type: 'focusUrl' } | { type: 'cycleFocus' }
 
 /**
  * Map a keydown to a browser shortcut. Cmd on macOS, Ctrl on Windows; Ctrl+Tab on both.
@@ -12,6 +12,9 @@ export function shortcutFor(
   platform: string
 ): Shortcut | null {
   if (input.type !== 'keyDown') return null
+  // F6 moves focus between the page and the sidebar, as in other browsers.
+  if (input.key === 'F6' && !input.meta && !input.control && !input.alt)
+    return { type: 'cycleFocus' }
   const spaceMod =
     platform === 'darwin'
       ? input.control && !input.meta && !input.alt

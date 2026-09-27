@@ -26,6 +26,11 @@ const api = {
     ipcRenderer.on(IPC.snapshot, listener)
     return () => ipcRenderer.off(IPC.snapshot, listener)
   },
+  onFocusSidebar: (cb: () => void): (() => void) => {
+    const listener = (): void => cb()
+    ipcRenderer.on(IPC.focusSidebar, listener)
+    return () => ipcRenderer.off(IPC.focusSidebar, listener)
+  },
   onToast: (cb: (message: string) => void): (() => void) => {
     const listener = (_e: unknown, message: string): void => cb(message)
     ipcRenderer.on(IPC.toast, listener)

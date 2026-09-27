@@ -46,6 +46,7 @@ test('ranking 5,000 history entries stays well inside a 16ms frame per keystroke
     url: `https://www.${pick()}.com/${pick()}/${pick()}/${i}?ref=${pick()}`
   }))
   const prepared = searchable(items) // done once when the bar opens
+  rank('warm', prepared, 8) // JIT warm-up, not a keystroke the user sees
   const times: number[] = []
   for (const query of [
     'g',

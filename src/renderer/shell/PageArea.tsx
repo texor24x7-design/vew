@@ -90,6 +90,19 @@ function Divider(props: {
       role="separator"
       aria-orientation={row ? 'vertical' : 'horizontal'}
       aria-label="Resize split"
+      aria-valuenow={Math.round(split.sizes[index] * 100)}
+      tabIndex={0}
+      onKeyDown={(e) => {
+        const back = row ? 'ArrowLeft' : 'ArrowUp'
+        const fwd = row ? 'ArrowRight' : 'ArrowDown'
+        if (e.key !== back && e.key !== fwd) return
+        e.preventDefault()
+        const edge = (row ? rect.x + rect.width : rect.y + rect.height) + (e.key === fwd ? 24 : -24)
+        send({
+          type: 'resizeSplit',
+          sizes: resizeSplit(card, split.direction, split.sizes, index, edge)
+        })
+      }}
       className={`no-drag group absolute grid place-items-center ${row ? 'cursor-col-resize' : 'cursor-row-resize'}`}
       style={box(gap)}
       onPointerDown={(e) => e.currentTarget.setPointerCapture(e.pointerId)}

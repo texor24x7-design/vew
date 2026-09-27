@@ -61,7 +61,13 @@ if (!app.requestSingleInstanceLock()) {
     session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) =>
       callback(false)
     )
-    serveInternalPages((url) => mainWindow().run({ type: 'open', input: url }))
+    serveInternalPages({
+      openUrl: (url) => mainWindow().run({ type: 'open', input: url }),
+      colors: () => mainWindow().spaceColors(),
+      setColors: (colors) => mainWindow().setSpaceColors(colors),
+      importBookmarks: (folder) => mainWindow().importBookmarks(folder),
+      finishWelcome: () => mainWindow().finishWelcome()
+    })
     void loadBlocker()
     mainWindow()
     // Launched to open a link (Windows passes it as an argument; macOS queued it above).

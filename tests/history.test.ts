@@ -22,6 +22,14 @@ test('records visits, counts repeats, keeps titles, orders by recency, clears', 
   expect(h.search('100%_', 10)).toEqual([]) // LIKE wildcards in the query are literal
   h.delete('https://a.com/')
   expect(h.recent().map((i) => i.url)).toEqual(['https://b.com/'])
+  h.importItems([
+    { url: 'https://b.com/', title: 'ignored', visits: 9, lastVisit: 1 },
+    { url: 'https://c.com/', title: 'C', visits: 3, lastVisit: 7 }
+  ])
+  expect(h.recent()).toEqual([
+    { url: 'https://c.com/', title: 'C', visits: 3, lastVisit: 7 },
+    { url: 'https://b.com/', title: 'B', visits: 9, lastVisit: 2 } // higher count, later visit, title kept
+  ])
   h.clear()
   expect(h.recent()).toEqual([])
   h.close()

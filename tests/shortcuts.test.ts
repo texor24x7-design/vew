@@ -90,6 +90,11 @@ test('browser essentials shortcuts on both platforms', () => {
   expect(shortcutFor(key('h', { meta: true }), 'darwin')).toBeNull() // Cmd+H is "Hide" on macOS
 })
 
+test('F6 cycles focus between page and sidebar on both platforms', () => {
+  expect(shortcutFor(key('F6'), 'darwin')).toEqual({ type: 'cycleFocus' })
+  expect(shortcutFor(key('F6', { shift: true }), 'win32')).toEqual({ type: 'cycleFocus' })
+})
+
 test('the other platform’s modifier does nothing', () => {
   expect(shortcutFor(key('w', { control: true }), 'darwin')).toBeNull()
   expect(shortcutFor(key('w', { meta: true }), 'win32')).toBeNull()

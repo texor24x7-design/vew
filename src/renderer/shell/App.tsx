@@ -2,7 +2,12 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { Archive, ArrowLeft, ArrowRight, PanelLeft, RotateCw, X } from 'lucide-react'
 import { EMPTY_STATE, type BrowserState, type SiteInfo, type TabState } from '../../shared/ipc'
-import { PAGE_INSET, SIDEBAR_DEFAULT_WIDTH } from '../../shared/layout'
+import {
+  PAGE_INSET,
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH
+} from '../../shared/layout'
 import { DEFAULT_THEME, palette } from '../../shared/theme'
 import { displayHost } from '../../shared/url'
 import { icon } from '../shared/ui'
@@ -22,6 +27,17 @@ const spring = { type: 'spring', stiffness: 500, damping: 40 } as const
 export default function App(): React.JSX.Element {
   const [state, setState] = useState<BrowserState>(EMPTY_STATE)
   useEffect(() => window.vew.onState(setState), [])
+  // F6: land on the active tab's row (or the address field if there's none).
+  useEffect(
+    () =>
+      window.vew.onFocusSidebar(() => {
+        const target =
+          document.querySelector<HTMLElement>('[data-row][aria-current="page"]') ??
+          document.querySelector<HTMLElement>('[aria-label="Address"]')
+        target?.focus()
+      }),
+    []
+  )
   // What the sidebar body shows instead of the tabs, if anything.
   const [panel, setPanel] = useState<'archive' | 'downloads' | null>(null)
   const systemDark = useSystemDark()
@@ -79,6 +95,7 @@ export default function App(): React.JSX.Element {
           initial={false}
           animate={{ x: hidden ? -(sidebar.width + PAGE_INSET) : 0 }}
           transition={{ duration: 0.18, ease: 'easeOut' }}
+          aria-label="Sidebar"
           className="absolute inset-y-0 left-0 flex flex-col gap-2 px-2"
           style={{ width: sidebar.width }}
           onWheel={onWheel}
@@ -206,8 +223,21 @@ function ResizeHandle({ width }: { width: number }): React.JSX.Element {
   const frame = useRef(0)
   return (
     <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize sidebar"
+      aria-valuenow={width}
+      aria-valuemin={SIDEBAR_MIN_WIDTH}
+      aria-valuemax={SIDEBAR_MAX_WIDTH}
+      tabIndex={0}
       className="no-drag absolute inset-y-0 w-2 cursor-col-resize"
       style={{ left: width }}
+      onKeyDown={(e) => {
+        const step = e.key === 'ArrowLeft' ? -16 : e.key === 'ArrowRight' ? 16 : 0
+        if (!step) return
+        e.preventDefault()
+        send({ type: 'sidebar', width: width + step })
+      }}
       onPointerDown={(e) => e.currentTarget.setPointerCapture(e.pointerId)}
       onPointerMove={(e) => {
         if (!e.currentTarget.hasPointerCapture(e.pointerId)) return

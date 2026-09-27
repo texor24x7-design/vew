@@ -1,5 +1,5 @@
 import type { Rect, SplitDirection } from './layout'
-import { isTheme, type Theme } from './theme'
+import { isHexColor, isTheme, type Theme } from './theme'
 import { SEARCH_ENGINES, type SearchEngine } from './url'
 
 /** Every IPC channel and payload between main and the shell/overlay renderers. */
@@ -10,6 +10,8 @@ export const IPC = {
   state: 'vew:state',
   /** main → shell: focus the URL pill */
   focusUrl: 'vew:focus-url',
+  /** main → shell: move keyboard focus into the sidebar (F6) */
+  focusSidebar: 'vew:focus-sidebar',
   /** main → shell: a short message for the toast */
   toast: 'vew:toast',
   /** main → overlay: PaletteData, show the command bar */
@@ -194,6 +196,24 @@ export type InternalRequest =
   | { method: 'extInstall'; source: string }
   | { method: 'extLoadUnpacked' }
   | { method: 'extRemove'; id: string }
+  | { method: 'welcomeState' }
+  | { method: 'setColors'; colors: string[] }
+  | { method: 'import'; source: string; bookmarks: boolean; history: boolean }
+  | { method: 'welcomeDone' }
+
+/** Another browser on this computer we can import from. */
+export interface ImportSource {
+  id: string
+  name: string
+  bookmarks: number
+  history: boolean
+}
+
+export interface WelcomeState {
+  sources: ImportSource[]
+  colors: string[]
+  isDefaultBrowser: boolean
+}
 
 export interface SettingsView {
   settings: Settings
@@ -221,6 +241,18 @@ export function isInternalRequest(x: unknown): x is InternalRequest {
     case 'extList':
     case 'extLoadUnpacked':
       return true
+    case 'welcomeState':
+    case 'welcomeDone':
+      return true
+    case 'setColors':
+      return (
+        Array.isArray(r.colors) &&
+        r.colors.length >= 2 &&
+        r.colors.length <= 3 &&
+        r.colors.every(isHexColor)
+      )
+    case 'import':
+      return str(r.source, 20) && typeof r.bookmarks === 'boolean' && typeof r.history === 'boolean'
     case 'extInstall':
       return str(r.source, 500)
     case 'extRemove':

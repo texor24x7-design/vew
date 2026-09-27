@@ -52,34 +52,36 @@ export function SpaceSwitcher(props: {
   onEdit: (id: number) => void
 }): React.JSX.Element {
   return (
-    <div
-      className="flex min-w-0 flex-1 items-center justify-center gap-0.5 overflow-hidden"
-      role="tablist"
-      aria-label="Spaces"
-    >
-      {props.spaces.map((sp) => {
-        const active = sp.id === props.activeSpaceId
-        return (
-          <button
-            key={sp.id}
-            role="tab"
-            aria-selected={active}
-            aria-label={sp.name}
-            title={sp.name}
-            className={`grid size-7 shrink-0 place-items-center rounded-md text-[14px] transition-[opacity,transform] duration-150 hover:bg-(--hover) ${
-              active ? 'bg-(--fill)' : 'opacity-60 hover:opacity-100'
-            }`}
-            onClick={() => send({ type: 'switchSpace', id: sp.id })}
-            onDoubleClick={() => props.onEdit(sp.id)}
-            onContextMenu={(e) => {
-              e.preventDefault()
-              send({ type: 'spaceMenu', id: sp.id })
-            }}
-          >
-            {sp.icon}
-          </button>
-        )
-      })}
+    <div className="flex min-w-0 flex-1 items-center justify-center gap-0.5 overflow-hidden">
+      <div
+        role="tablist"
+        aria-label="Spaces"
+        className="flex min-w-0 items-center gap-0.5 overflow-hidden"
+      >
+        {props.spaces.map((sp) => {
+          const active = sp.id === props.activeSpaceId
+          return (
+            <button
+              key={sp.id}
+              role="tab"
+              aria-selected={active}
+              aria-label={sp.name}
+              title={sp.name}
+              className={`grid size-7 shrink-0 place-items-center rounded-md text-[14px] transition-[opacity,transform] duration-150 hover:bg-(--hover) ${
+                active ? 'bg-(--fill)' : 'opacity-60 hover:opacity-100'
+              }`}
+              onClick={() => send({ type: 'switchSpace', id: sp.id })}
+              onDoubleClick={() => props.onEdit(sp.id)}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                send({ type: 'spaceMenu', id: sp.id })
+              }}
+            >
+              {sp.icon}
+            </button>
+          )
+        })}
+      </div>
       <button
         className="grid size-7 shrink-0 place-items-center rounded-md text-(--muted) hover:bg-(--hover)"
         aria-label="New Space"

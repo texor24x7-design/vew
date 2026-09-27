@@ -237,7 +237,7 @@ export function Tabs({ state }: { state: BrowserState }): React.JSX.Element {
               dragging={dragged !== null}
               hint="Drop here to pin"
             >
-              <NodeList nodes={state.pinned} zone="pinned" parent={null} />
+              <NodeList nodes={state.pinned} zone="pinned" parent={null} label="Pinned tabs" />
             </Zone>
             <div className="mx-2 h-px shrink-0 bg-(--line)" />
             <button
@@ -248,7 +248,10 @@ export function Tabs({ state }: { state: BrowserState }): React.JSX.Element {
               New Tab
             </button>
             <Zone zone="today" count={state.today.length} dragging={dragged !== null} grow>
-              <NodeList nodes={state.today} zone="today" parent={null} />
+              <NodeList nodes={state.today} zone="today" parent={null} label="Today" />
+              {!state.today.length && !dragged && (
+                <p className="px-2 py-1 text-[12px] text-(--muted)">No open tabs</p>
+              )}
             </Zone>
           </div>
         </DropCtx.Provider>
@@ -303,9 +306,10 @@ function NodeList(props: {
   nodes: NodeState[]
   zone: Zone
   parent: number | null
+  label: string
 }): React.JSX.Element {
   return (
-    <ul className="flex flex-col gap-0.5">
+    <ul className="flex flex-col gap-0.5" aria-label={props.label}>
       <AnimatePresence initial={false}>
         {props.nodes.map((n, index) => {
           const slot: Slot = {
@@ -324,6 +328,39 @@ function NodeList(props: {
       </AnimatePresence>
     </ul>
   )
+}
+
+/** Move keyboard focus to the previous/next row or tile in the sidebar (document order). */
+function focusSibling(from: HTMLElement, step: 1 | -1): void {
+  const rows = [...document.querySelectorAll<HTMLElement>('[data-row]')]
+  rows[rows.indexOf(from) + step]?.focus()
+}
+
+/**
+ * Keyboard for sidebar rows: arrows move focus, Enter/Space opens, Delete closes,
+ * Alt+arrows move the row up or down within its list.
+ */
+function rowKeys(
+  e: React.KeyboardEvent<HTMLElement>,
+  opts: { open: () => void; close?: () => void; id: number; slot: Slot; horizontal?: boolean }
+): void {
+  const prev = opts.horizontal ? 'ArrowLeft' : 'ArrowUp'
+  const next = opts.horizontal ? 'ArrowRight' : 'ArrowDown'
+  if ((e.key === prev || e.key === next) && e.altKey) {
+    const down = e.key === next
+    const { zone, parent, index } = opts.slot
+    send({
+      type: 'move',
+      id: opts.id,
+      where: { zone, parent, index: down ? index + 2 : Math.max(0, index - 1) }
+    })
+  } else if (e.key === prev || e.key === 'ArrowUp') focusSibling(e.currentTarget, -1)
+  else if (e.key === next || e.key === 'ArrowDown') focusSibling(e.currentTarget, 1)
+  else if (e.key === 'Enter' || e.key === ' ') opts.open()
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && opts.close) opts.close()
+  else return
+  e.preventDefault()
+  e.stopPropagation()
 }
 
 /** Shared drag + drop wiring for a row or tile. */
@@ -374,40 +411,52 @@ function TabRow({ tab, slot }: { tab: TabState; slot: Slot }): React.JSX.Element
   // Today tabs close; pinned tabs only unload, so the X only shows while loaded.
   const closable = slot.zone === 'today' || tab.loaded
   return (
+    // The row is a list item holding two controls side by side: the tab itself and its close button
+    // (nesting a button inside another would break screen readers).
     <motion.li
       layout="position"
       initial={{ opacity: 0, height: 0 }}
       animate={{ opacity: isDragged ? 0.4 : 1, height: 32 }}
       exit={{ opacity: 0, height: 0 }}
-      ref={setNodeRef}
-      {...handlers}
-      className={`group relative flex shrink-0 cursor-default items-center gap-2 rounded-lg px-2 outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 ${
+      className={`group relative flex shrink-0 items-center gap-2 rounded-lg pr-2 has-[[data-row]:focus-visible]:ring-2 has-[[data-row]:focus-visible]:ring-blue-500/60 ${
         active ? 'bg-(--active) shadow-sm' : 'hover:bg-(--hover)'
       } ${tab.loading ? 'shimmer overflow-hidden' : ''}`}
-      onClick={() => send({ type: 'activate', id: tab.id })}
-      onAuxClick={(e) => e.button === 1 && send({ type: 'close', id: tab.id })}
-      onContextMenu={(e) => {
-        e.preventDefault()
-        send({ type: 'contextMenu', id: tab.id })
-      }}
       title={tab.title}
     >
-      <Favicon tab={tab} />
-      <span className={`min-w-0 flex-1 truncate ${tab.loaded || active ? '' : 'text-(--muted)'}`}>
-        {tab.title}
-      </span>
-      {tab.inSplit && (
-        <Columns2
-          size={14}
-          strokeWidth={1.5}
-          className="shrink-0 text-(--muted)"
-          aria-label="In split view"
-        />
-      )}
+      <div
+        ref={setNodeRef}
+        {...handlers}
+        data-row
+        aria-label={`${tab.title}${tab.loading ? ', loading' : ''}${tab.inSplit ? ', in split view' : ''}${tab.loaded ? '' : ', not loaded'}`}
+        aria-current={active ? 'page' : undefined}
+        className="flex min-w-0 flex-1 cursor-default items-center gap-2 self-stretch pl-2 outline-none"
+        onKeyDown={(e) =>
+          rowKeys(e, {
+            id: tab.id,
+            slot,
+            open: () => send({ type: 'activate', id: tab.id }),
+            close: closable ? () => send({ type: 'close', id: tab.id }) : undefined
+          })
+        }
+        onClick={() => send({ type: 'activate', id: tab.id })}
+        onAuxClick={(e) => e.button === 1 && send({ type: 'close', id: tab.id })}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          send({ type: 'contextMenu', id: tab.id })
+        }}
+      >
+        <Favicon tab={tab} />
+        <span className={`min-w-0 flex-1 truncate ${tab.loaded || active ? '' : 'text-(--muted)'}`}>
+          {tab.title}
+        </span>
+        {tab.inSplit && (
+          <Columns2 size={14} strokeWidth={1.5} className="shrink-0 text-(--muted)" aria-hidden />
+        )}
+      </div>
       {closable && (
         <button
-          className="grid size-5 shrink-0 place-items-center rounded text-(--muted) opacity-0 group-hover:opacity-100 hover:bg-(--hover)"
-          aria-label={slot.zone === 'today' ? 'Close tab' : 'Unload tab'}
+          className="grid size-5 shrink-0 place-items-center rounded text-(--muted) opacity-0 group-hover:opacity-100 hover:bg-(--hover) focus-visible:opacity-100"
+          aria-label={`${slot.zone === 'today' ? 'Close' : 'Unload'} ${tab.title}`}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation()
@@ -450,6 +499,17 @@ function FolderItem({ folder, slot }: { folder: FolderState; slot: Slot }): Reac
         className={`relative flex h-8 cursor-default items-center gap-1.5 rounded-lg px-2 text-(--fg) outline-none hover:bg-(--hover) focus-visible:ring-2 focus-visible:ring-blue-500/60 ${
           pos === 'into' ? 'bg-blue-500/10 ring-1 ring-blue-500' : ''
         }`}
+        data-row
+        aria-label={`Folder ${folder.name}, ${folder.children.length} items`}
+        aria-expanded={folder.open}
+        onKeyDown={(e) =>
+          !editing &&
+          rowKeys(e, {
+            id: folder.id,
+            slot,
+            open: () => send({ type: 'toggleFolder', id: folder.id })
+          })
+        }
         onClick={() => !editing && send({ type: 'toggleFolder', id: folder.id })}
         onDoubleClick={() => setEditing(true)}
         onContextMenu={(e) => {
@@ -479,7 +539,12 @@ function FolderItem({ folder, slot }: { folder: FolderState; slot: Slot }): Reac
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden pl-4"
           >
-            <NodeList nodes={folder.children} zone="pinned" parent={folder.id} />
+            <NodeList
+              nodes={folder.children}
+              zone="pinned"
+              parent={folder.id}
+              label={folder.name}
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -572,6 +637,16 @@ function FavoriteTile({ tab, slot }: { tab: TabState; slot: Slot }): React.JSX.E
       className={`relative grid h-10 place-items-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 ${
         active ? 'bg-(--active) shadow-sm' : 'bg-(--fill) hover:bg-(--hover)'
       } ${tab.loading ? 'shimmer overflow-hidden' : ''}`}
+      data-row
+      aria-current={active ? 'page' : undefined}
+      onKeyDown={(e) =>
+        rowKeys(e, {
+          id: tab.id,
+          slot,
+          horizontal: true,
+          open: () => send({ type: 'activate', id: tab.id })
+        })
+      }
       onClick={() => send({ type: 'activate', id: tab.id })}
       onContextMenu={(e) => {
         e.preventDefault()

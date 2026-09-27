@@ -74,6 +74,25 @@ export class History {
     this.deleteStmt.run(url)
   }
 
+  /** Merge history from elsewhere (an import): keeps the higher visit count and the latest visit. */
+  importItems(items: HistoryItem[]): void {
+    const upsert = this.db.prepare(`
+      INSERT INTO history (url, title, visits, last_visit) VALUES (?, ?, ?, ?)
+      ON CONFLICT (url) DO UPDATE SET
+        visits = MAX(visits, excluded.visits),
+        last_visit = MAX(last_visit, excluded.last_visit),
+        title = CASE WHEN title = '' THEN excluded.title ELSE title END
+    `)
+    this.db.exec('BEGIN')
+    try {
+      for (const i of items) upsert.run(i.url, i.title, i.visits, i.lastVisit)
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+  }
+
   clear(): void {
     this.db.exec('DELETE FROM history')
   }
