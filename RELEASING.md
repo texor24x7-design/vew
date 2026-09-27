@@ -12,8 +12,8 @@
 | `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | For notarization                                                               |
 | `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD`                     | Windows code-signing certificate (.pfx, base64) and its password               |
 
-Without them releases still build: macOS apps are ad-hoc signed (users right-click → Open the first time,
-and macOS won't auto-update them), Windows shows a SmartScreen warning.
+Without them releases still build: macOS apps are ad-hoc signed (on first launch users go to System Settings →
+Privacy & Security → Open Anyway, and macOS won't auto-update them), Windows shows a SmartScreen warning.
 
 ## Cut a release
 

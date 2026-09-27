@@ -30,7 +30,7 @@ function detectOS() {
 }
 
 const TIPS = {
-  mac: 'Your download is starting. Open Vew-mac.dmg and drag Vew to Applications. The first time, right-click Vew and choose Open.',
+  mac: 'Your download is starting. Open Vew-mac.dmg and drag Vew to Applications. If macOS says it can’t verify Vew, choose Done, then open System Settings → Privacy & Security and click Open Anyway.',
   win: 'Your download is starting. Run the installer; if Windows SmartScreen appears, choose More info → Run anyway.'
 }
 
