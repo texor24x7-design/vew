@@ -1,3 +1,5 @@
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { app, BrowserWindow, nativeTheme, session } from 'electron'
 import { loadBlocker } from './adblock'
@@ -9,6 +11,14 @@ import { refreshAccounts } from './texor'
 import { VewWindow } from './window'
 
 registerInternalScheme()
+
+// `npm run dev:fresh` (or VEW_FRESH=1): a first-run Vew with throwaway data, beside your normal one.
+if (
+  !app.isPackaged &&
+  (process.env['npm_lifecycle_event'] === 'dev:fresh' || process.env['VEW_FRESH'])
+) {
+  app.setPath('userData', mkdtempSync(join(tmpdir(), 'vew-fresh-')))
+}
 
 let main: VewWindow | null = null
 /** The browser window, created on demand (e.g. a link arrives while it's closed on macOS). */
