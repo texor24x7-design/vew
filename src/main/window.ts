@@ -2,9 +2,12 @@ import { join } from 'node:path'
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   Menu,
+  nativeTheme,
+  net,
   WebContentsView,
   type Event,
   type Input,
@@ -20,12 +23,16 @@ import {
   type BrowserState,
   type Command,
   type NodeState,
+  type PaletteData,
+  type PaletteTab,
   type Profile,
-  type TabState
+  type TabState,
+  type Zone
 } from '../shared/ipc'
 import { PAGE_RADIUS, WIN_TITLEBAR_HEIGHT, clampSidebarWidth, pageBounds } from '../shared/layout'
 import { PRESETS } from '../shared/theme'
 import { toUrl, type SearchEngine } from '../shared/url'
+import { History } from './history'
 import { sessionFor } from './profiles'
 import { shortcutFor } from './shortcuts'
 import { ARCHIVE_LIMIT, emptySaved, fromLive, load as loadSaved, save, toLive } from './store'
@@ -53,6 +60,44 @@ const isMac = process.platform === 'darwin'
 /** Default icons for new Spaces, so they're distinguishable in the switcher before being customized. */
 const SPACE_ICONS = ['🏠', '💼', '🌿', '🔥', '🌊', '🎨', '📚', '🚀', '⭐️']
 
+let historyDb: History | undefined
+/** One history database for the app, opened on first use. */
+const history = (): History => {
+  if (!historyDb) {
+    historyDb = new History(join(app.getPath('userData'), 'history.db'))
+    app.once('will-quit', () => historyDb?.close())
+  }
+  return historyDb
+}
+
+// ponytail: Google suggestions only, matching the fixed engine; follow the engine setting in Phase 6.
+async function suggest(query: string): Promise<string[]> {
+  const q = query.trim()
+  if (!q) return []
+  try {
+    const res = await net.fetch(
+      `https://suggestqueries.google.com/complete/search?client=firefox&ie=utf-8&oe=utf-8&q=${encodeURIComponent(q)}`,
+      { signal: AbortSignal.timeout(1500) }
+    )
+    const body: unknown = await res.json()
+    const list = Array.isArray(body) ? body[1] : null
+    return Array.isArray(list) ? list.filter((s) => typeof s === 'string').slice(0, 5) : []
+  } catch {
+    return [] // offline or slow: the bar still works from local data
+  }
+}
+
+/** Load one of the renderer pages (shell, overlay) from the dev server or the build. */
+function loadPage(wc: WebContents, page: 'shell' | 'overlay', query: Record<string, string>): void {
+  if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
+    wc.loadURL(
+      `${process.env['ELECTRON_RENDERER_URL']}/${page}/index.html?${new URLSearchParams(query)}`
+    )
+  } else {
+    wc.loadFile(join(__dirname, `../renderer/${page}/index.html`), { query })
+  }
+}
+
 let nextId = 1
 const newId = (): number => nextId++
 
@@ -74,6 +119,12 @@ const onlyTabs = (list: Node[]): Tab[] => list.filter((n): n is Tab => n.kind ==
 /** One browser window: its shell UI plus the tabs it owns. */
 export class VewWindow {
   readonly win: BrowserWindow
+  /** Transparent view stacked above the page while the command bar is open. */
+  private readonly overlay: WebContentsView
+  /** Overlay view is attached (the bar is open or animating out). */
+  private paletteOpen = false
+  private paletteSeq = 0
+  private paletteFallback?: NodeJS.Timeout
   private readonly file = join(app.getPath('userData'), 'sidebar.json')
   private favorites: Node[]
   private spaces: Space[]
@@ -129,10 +180,20 @@ export class VewWindow {
     })
 
     const shell = this.win.webContents
+    this.overlay = new WebContentsView({
+      webPreferences: { ...secureWebPreferences, preload: join(__dirname, '../preload/overlay.js') }
+    })
+    this.overlay.setBackgroundColor('#00000000')
+    const overlay = this.overlay.webContents
+    overlay.on('before-input-event', (e, input) => this.onInput(e, input))
+
     const onCommand = (e: IpcMainEvent, cmd: unknown): void => {
-      if (e.sender === shell && isCommand(cmd)) this.run(cmd)
+      if ((e.sender === shell || e.sender === overlay) && isCommand(cmd)) this.run(cmd)
     }
     ipcMain.on(IPC.command, onCommand)
+    ipcMain.handle(IPC.suggest, (e, query: unknown) =>
+      e.sender === overlay && typeof query === 'string' && query.length <= 200 ? suggest(query) : []
+    )
     shell.on('before-input-event', (e, input) => this.onInput(e, input))
     shell.on('did-finish-load', () => this.push())
     this.win.on('resize', () => this.layout())
@@ -140,12 +201,15 @@ export class VewWindow {
     const archiveTimer = setInterval(() => this.archiveIdle(), ARCHIVE_CHECK_MS)
     this.win.on('closed', () => {
       ipcMain.off(IPC.command, onCommand)
+      ipcMain.removeHandler(IPC.suggest)
+      clearTimeout(this.paletteFallback)
       clearInterval(archiveTimer)
       clearTimeout(this.saveTimer)
       clearInterval(this.tween)
       this.save()
       this.disposed = true
       for (const t of this.allTabs()) if (t.view) closeView(t.view)
+      closeView(this.overlay)
     })
 
     // macOS vibrancy and Windows 11 Mica show through; elsewhere (Windows 10) the shell paints a solid tint.
@@ -153,11 +217,8 @@ export class VewWindow {
       isMac ||
       (process.platform === 'win32' && Number(process.getSystemVersion().split('.')[2]) >= 22000)
     const query = { platform: process.platform, material: hasMaterial ? '1' : '0' }
-    if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
-      this.win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}?${new URLSearchParams(query)}`)
-    } else {
-      this.win.loadFile(join(__dirname, '../renderer/index.html'), { query })
-    }
+    loadPage(shell, 'shell', query)
+    loadPage(overlay, 'overlay', query)
     this.updateTrafficLights()
     this.archiveIdle()
     if (!saved) this.openTab(HOME_URL, { activate: true })
@@ -294,6 +355,35 @@ export class VewWindow {
         return void this.deleteSpace(cmd.id)
       case 'spaceMenu':
         return this.spaceMenu(cmd.id)
+      case 'openPalette':
+        // The overlay owns open/closed (it may be mid-animation), so it decides whether this toggles it shut.
+        return this.openPalette()
+      case 'paletteHidden':
+        if (cmd.seq === this.paletteSeq) this.hidePalette()
+        return
+      case 'focusTab': {
+        const found = this.find(cmd.id)
+        if (!found) return
+        if (found.loc.zone !== 'favorites' && found.space !== this.space)
+          this.switchSpace(found.space.id)
+        return this.activate(cmd.id)
+      }
+      case 'copyUrl':
+        if (!active) return
+        // The clipboard API is async in current Electron: only confirm once the write lands.
+        clipboard.writeText(active.url).then(
+          () => this.toast('Link copied'),
+          () => this.toast('Couldn’t copy the link')
+        )
+        return
+      case 'toggleDarkMode': {
+        // ponytail: not persisted yet; the Phase 6 appearance setting will store it.
+        const dark = !nativeTheme.shouldUseDarkColors
+        nativeTheme.themeSource = dark ? 'dark' : 'light'
+        return this.toast(dark ? 'Dark mode on' : 'Light mode on')
+      }
+      case 'clearHistory':
+        return void this.clearHistory()
       case 'back':
         if (wc?.navigationHistory.canGoBack()) wc.navigationHistory.goBack()
         return
@@ -364,10 +454,20 @@ export class VewWindow {
     }
     wc.on('did-start-loading', () => update({ loading: true }))
     wc.on('did-stop-loading', () => update({ loading: false }))
-    wc.on('page-title-updated', (_e, title) => update({ title }))
+    wc.on('page-title-updated', (_e, title) => {
+      update({ title })
+      history().setTitle(wc.getURL(), title)
+    })
     wc.on('page-favicon-updated', (_e, favicons) => update({ favicon: favicons[0] }))
-    wc.on('did-navigate', (_e, url) => update({ url, favicon: undefined }))
-    wc.on('did-navigate-in-page', (_e, url, isMainFrame) => isMainFrame && update({ url }))
+    wc.on('did-navigate', (_e, url) => {
+      update({ url, favicon: undefined })
+      history().visit(url)
+    })
+    wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
+      if (!isMainFrame) return
+      update({ url })
+      history().visit(url, tab.title)
+    })
     wc.on('before-input-event', (e, input) => this.onInput(e, input))
     // The page closed itself (e.g. an OAuth popup calling window.close()). Views we unload ourselves are detached first.
     wc.on('destroyed', () => tab.view === view && this.closeTab(tab.id))
@@ -405,8 +505,10 @@ export class VewWindow {
       load(view.webContents, node.url)
     }
     this.win.contentView.addChildView(view)
+    // Adding a view puts it on top; keep the command bar above it while it animates out.
+    if (this.paletteOpen) this.win.contentView.addChildView(this.overlay)
+    else view.webContents.focus()
     this.layout()
-    view.webContents.focus()
     this.push()
   }
 
@@ -651,10 +753,86 @@ export class VewWindow {
     if (!shortcut) return
     e.preventDefault()
     if (shortcut.type !== 'focusUrl') return this.run(shortcut)
+    if (this.paletteOpen) this.closePalette()
     // The URL pill lives in the sidebar, so reveal it while typing.
     if (this.sidebar.collapsed) this.run({ type: 'sidebar', peek: true })
     this.win.webContents.focus()
-    this.win.webContents.send(IPC.focusUrl, { newTab: shortcut.newTab })
+    this.win.webContents.send(IPC.focusUrl)
+  }
+
+  private toast(message: string): void {
+    if (!this.disposed) this.win.webContents.send(IPC.toast, message)
+  }
+
+  private openPalette(): void {
+    const tabs: PaletteTab[] = []
+    const none: Node[] = []
+    const add = (list: Node[], zone: Zone, space: Space): void => {
+      for (const t of tabsInOrder({ favorites: list, pinned: none, today: none })) {
+        tabs.push({
+          id: t.id,
+          title: t.title || t.url,
+          url: t.url,
+          favicon: t.favicon,
+          zone,
+          spaceId: space.id,
+          spaceName: space.name,
+          spaceIcon: space.icon,
+          lastActive: t.lastActive,
+          active: t.id === this.activeId
+        })
+      }
+    }
+    add(this.favorites, 'favorites', this.space)
+    for (const sp of this.spaces) {
+      add(sp.pinned, 'pinned', sp)
+      add(sp.today, 'today', sp)
+    }
+    const data: PaletteData = {
+      seq: ++this.paletteSeq,
+      tabs,
+      history: history().recent(5000),
+      activeSpaceId: this.activeSpaceId,
+      searchEngine: 'Google'
+    }
+    this.paletteOpen = true
+    this.layout()
+    this.win.contentView.addChildView(this.overlay) // on top of everything
+    const wc = this.overlay.webContents
+    wc.focus()
+    if (wc.isLoading()) wc.once('did-finish-load', () => wc.send(IPC.paletteOpen, data))
+    else wc.send(IPC.paletteOpen, data)
+  }
+
+  /** Ask the command bar to animate out; it reports back with paletteHidden. */
+  private closePalette(): void {
+    this.overlay.webContents.send(IPC.paletteClose)
+    // If the overlay never answers (e.g. it crashed), don't leave an invisible layer eating clicks.
+    clearTimeout(this.paletteFallback)
+    const seq = this.paletteSeq
+    this.paletteFallback = setTimeout(() => seq === this.paletteSeq && this.hidePalette(), 600)
+  }
+
+  private hidePalette(): void {
+    clearTimeout(this.paletteFallback)
+    if (!this.paletteOpen || this.disposed) return
+    this.paletteOpen = false
+    this.win.contentView.removeChildView(this.overlay)
+    this.active()?.view?.webContents.focus()
+  }
+
+  private async clearHistory(): Promise<void> {
+    const { response } = await dialog.showMessageBox(this.win, {
+      type: 'warning',
+      message: 'Clear all browsing history?',
+      detail: 'This can’t be undone. Open tabs are not affected.',
+      buttons: ['Clear History', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1
+    })
+    if (response !== 0) return
+    history().clear()
+    this.toast('History cleared')
   }
 
   private updateTrafficLights(): void {
@@ -664,9 +842,10 @@ export class VewWindow {
   /** Place the active page card; `animate` eases it over the sidebar animation's duration. */
   private layout(animate = false): void {
     clearInterval(this.tween)
+    const [width, height] = this.win.getContentSize()
+    if (this.paletteOpen) this.overlay.setBounds({ x: 0, y: 0, width, height })
     const view = this.active()?.view
     if (!view) return
-    const [width, height] = this.win.getContentSize()
     const to = pageBounds(width, height, process.platform, this.sidebar)
     if (!animate) return view.setBounds(to)
     const from = view.getBounds()

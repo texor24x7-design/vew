@@ -2,7 +2,7 @@ import { useRef, useSyncExternalStore } from 'react'
 import { Minus, Plus } from 'lucide-react'
 import type { BrowserState, SpaceState } from '../../shared/ipc'
 import { PRESETS, palette, type Palette, type Theme } from '../../shared/theme'
-import { icon } from './Sidebar'
+import { icon } from '../shared/ui'
 
 const { send } = window.vew
 

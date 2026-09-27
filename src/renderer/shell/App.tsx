@@ -5,7 +5,8 @@ import { EMPTY_STATE, type BrowserState, type TabState } from '../../shared/ipc'
 import { PAGE_INSET, PAGE_RADIUS, SIDEBAR_DEFAULT_WIDTH, pageTop } from '../../shared/layout'
 import { DEFAULT_THEME, palette } from '../../shared/theme'
 import { displayHost } from '../../shared/url'
-import { ArchiveList, Tabs, findNode, icon } from './Sidebar'
+import { icon } from '../shared/ui'
+import { ArchiveList, Tabs, findNode } from './Sidebar'
 import { SpaceEditor, SpaceSwitcher, themeVars, useSpaceSwipe, useSystemDark } from './Spaces'
 
 const platform = new URLSearchParams(location.search).get('platform') ?? ''
@@ -124,14 +125,12 @@ export default function App(): React.JSX.Element {
                   transition={{ type: 'spring', stiffness: 400, damping: 40 }}
                   className="flex min-h-0 flex-1 flex-col gap-2"
                 >
-                  <Tabs
-                    state={state}
-                    onNewTab={() => window.dispatchEvent(new CustomEvent('vew:new-tab'))}
-                  />
+                  <Tabs state={state} />
                 </motion.div>
               </AnimatePresence>
             </div>
           )}
+          <Toast />
           <div className="flex h-10 shrink-0 items-center justify-between">
             <button
               className={`${iconButton} ${showArchive ? 'bg-(--fill)' : ''}`}
@@ -170,6 +169,35 @@ export default function App(): React.JSX.Element {
         )}
       </div>
     </MotionConfig>
+  )
+}
+
+/** "Link copied" and friends: a brief note above the bottom bar. */
+// ponytail: lives in the sidebar, so it's unseen while the sidebar is collapsed; move to the overlay if that matters.
+function Toast(): React.JSX.Element {
+  const [toast, setToast] = useState<{ text: string; key: number } | null>(null)
+  useEffect(() => window.vew.onToast((text) => setToast({ text, key: Date.now() })), [])
+  useEffect(() => {
+    if (!toast) return
+    const timer = setTimeout(() => setToast(null), 1800)
+    return () => clearTimeout(timer)
+  }, [toast])
+  return (
+    <div aria-live="polite" className="pointer-events-none relative h-0">
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            key={toast.key}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 6 }}
+            className="absolute inset-x-0 bottom-2 rounded-lg bg-neutral-900/90 px-3 py-2 text-[12px] text-white shadow-lg dark:bg-white/90 dark:text-neutral-900"
+          >
+            {toast.text}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   )
 }
 
@@ -236,17 +264,15 @@ function UrlPill({
   collapsed: boolean
 }): React.JSX.Element {
   const input = useRef<HTMLInputElement>(null)
-  // Refs mirror the mode synchronously: begin() calls focus(), whose handler runs before React re-renders.
-  const newTab = useRef(false)
+  // Mirrors `editing` synchronously: begin() calls focus(), whose handler runs before React re-renders.
   const editingNow = useRef(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
 
-  const begin = (openNewTab: boolean): void => {
-    newTab.current = openNewTab
+  const begin = (): void => {
     editingNow.current = true
     setEditing(true)
-    setDraft(openNewTab ? '' : (active?.url ?? ''))
+    setDraft(active?.url ?? '')
     input.current?.focus()
     requestAnimationFrame(() => input.current?.select())
   }
@@ -259,12 +285,7 @@ function UrlPill({
     if (collapsed) send({ type: 'sidebar', peek: false })
   }
   const beginFromEvent = useEffectEvent(begin)
-  useEffect(() => window.vew.onFocusUrl(({ newTab }) => beginFromEvent(newTab)), [])
-  useEffect(() => {
-    const onNewTab = (): void => beginFromEvent(true)
-    window.addEventListener('vew:new-tab', onNewTab)
-    return () => window.removeEventListener('vew:new-tab', onNewTab)
-  }, [])
+  useEffect(() => window.vew.onFocusUrl(() => beginFromEvent()), [])
 
   return (
     <input
@@ -275,11 +296,11 @@ function UrlPill({
       aria-label="Address"
       value={editing ? draft : active ? displayHost(active.url) : ''}
       onChange={(e) => setDraft(e.target.value)}
-      onFocus={() => !editingNow.current && begin(false)}
+      onFocus={() => !editingNow.current && begin()}
       onBlur={end}
       onKeyDown={(e) => {
         if (e.key === 'Enter' && draft.trim()) {
-          send({ type: newTab.current || !active ? 'open' : 'navigate', input: draft })
+          send({ type: active ? 'navigate' : 'open', input: draft })
           end()
         } else if (e.key === 'Escape') {
           end()

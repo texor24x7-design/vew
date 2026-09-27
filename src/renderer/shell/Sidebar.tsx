@@ -14,7 +14,8 @@ import {
   type DragEndEvent,
   type DragMoveEvent
 } from '@dnd-kit/core'
-import { ChevronRight, Folder, Globe, Plus, X } from 'lucide-react'
+import { ChevronRight, Folder, Plus, X } from 'lucide-react'
+import { Favicon, icon } from '../shared/ui'
 import type {
   ArchivedTab,
   BrowserState,
@@ -26,7 +27,6 @@ import type {
 } from '../../shared/ipc'
 
 const { send } = window.vew
-export const icon = { size: 16, strokeWidth: 1.5 }
 
 /** What a droppable represents: a row (tab/folder) at a position, or the end of a zone. */
 interface Slot {
@@ -112,13 +112,7 @@ export function findNode(nodes: NodeState[], id: number): NodeState | null {
   return null
 }
 
-export function Tabs({
-  state,
-  onNewTab
-}: {
-  state: BrowserState
-  onNewTab: () => void
-}): React.JSX.Element {
+export function Tabs({ state }: { state: BrowserState }): React.JSX.Element {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
   const [dragged, setDragged] = useState<NodeState | null>(null)
   const [drop, setDrop] = useState<Drop | null>(null)
@@ -164,7 +158,7 @@ export function Tabs({
             <div className="mx-2 h-px shrink-0 bg-(--line)" />
             <button
               className="flex h-8 shrink-0 items-center gap-2 rounded-lg px-2 text-(--muted) hover:bg-(--hover)"
-              onClick={onNewTab}
+              onClick={() => send({ type: 'openPalette' })}
             >
               <Plus {...icon} />
               New Tab
@@ -286,14 +280,6 @@ function Indicator({
         vertical ? 'inset-y-1 w-0.5' : 'inset-x-1 h-0.5'
       }`}
     />
-  )
-}
-
-function Favicon({ tab }: { tab: { favicon?: string } }): React.JSX.Element {
-  return tab.favicon ? (
-    <img src={tab.favicon} alt="" className="size-4 shrink-0 rounded-sm" draggable={false} />
-  ) : (
-    <Globe {...icon} className="shrink-0 text-(--muted)" />
   )
 }
 

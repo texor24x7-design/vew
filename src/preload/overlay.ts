@@ -1,0 +1,20 @@
+import { contextBridge, ipcRenderer } from 'electron'
+import { IPC, type Command, type PaletteData } from '../shared/ipc'
+
+const api = {
+  send: (cmd: Command): void => ipcRenderer.send(IPC.command, cmd),
+  suggest: (query: string): Promise<string[]> => ipcRenderer.invoke(IPC.suggest, query),
+  onOpen: (cb: (data: PaletteData) => void): (() => void) => {
+    const listener = (_e: unknown, data: PaletteData): void => cb(data)
+    ipcRenderer.on(IPC.paletteOpen, listener)
+    return () => ipcRenderer.off(IPC.paletteOpen, listener)
+  },
+  onClose: (cb: () => void): (() => void) => {
+    const listener = (): void => cb()
+    ipcRenderer.on(IPC.paletteClose, listener)
+    return () => ipcRenderer.off(IPC.paletteClose, listener)
+  }
+}
+
+export type OverlayApi = typeof api
+contextBridge.exposeInMainWorld('vew', api)

@@ -6,8 +6,16 @@ export const IPC = {
   command: 'vew:command',
   /** main → shell: BrowserState */
   state: 'vew:state',
-  /** main → shell: FocusUrl */
-  focusUrl: 'vew:focus-url'
+  /** main → shell: focus the URL pill */
+  focusUrl: 'vew:focus-url',
+  /** main → shell: a short message for the toast */
+  toast: 'vew:toast',
+  /** main → overlay: PaletteData, show the command bar */
+  paletteOpen: 'vew:palette-open',
+  /** main → overlay: animate the command bar out */
+  paletteClose: 'vew:palette-close',
+  /** overlay → main (invoke): search suggestions for a query → string[] */
+  suggest: 'vew:suggest'
 } as const
 
 /** favorites: icon grid shared across Spaces; pinned: persistent tree with folders; today: auto-archiving. */
@@ -82,9 +90,35 @@ export interface BrowserState {
   editSpaceId: number | null
 }
 
-/** Ask the shell to focus the URL pill; `newTab` means Enter opens a new tab. */
-export interface FocusUrl {
-  newTab: boolean
+/** A tab as the command bar sees it (from any Space). */
+export interface PaletteTab {
+  id: number
+  title: string
+  url: string
+  favicon?: string
+  zone: Zone
+  spaceId: number
+  spaceName: string
+  spaceIcon: string
+  lastActive: number
+  active: boolean
+}
+
+export interface PaletteHistory {
+  url: string
+  title: string
+  visits: number
+  lastVisit: number
+}
+
+/** Snapshot sent when the command bar opens; it searches this locally so every keystroke is instant. */
+export interface PaletteData {
+  /** Identifies this opening; echoed back in paletteHidden so a late "hidden" from an earlier one is ignored. */
+  seq: number
+  tabs: PaletteTab[]
+  history: PaletteHistory[]
+  activeSpaceId: number
+  searchEngine: string
 }
 
 /** A drop position: `parent` is a pinned folder id, or null for the zone's top level. */
@@ -124,6 +158,12 @@ export type Command =
   | { type: 'newProfile'; spaceId: number }
   | { type: 'deleteSpace'; id: number }
   | { type: 'spaceMenu'; id: number }
+  | { type: 'openPalette' }
+  | { type: 'paletteHidden'; seq: number }
+  | { type: 'focusTab'; id: number }
+  | { type: 'copyUrl' }
+  | { type: 'toggleDarkMode' }
+  | { type: 'clearHistory' }
   | { type: 'back' }
   | { type: 'forward' }
   | { type: 'reload' }
@@ -170,6 +210,12 @@ const validators: { [K in Command['type']]: (c: Record<string, unknown>) => bool
   newProfile: (c) => int(c.spaceId),
   deleteSpace: (c) => int(c.id),
   spaceMenu: (c) => int(c.id),
+  openPalette: bare,
+  paletteHidden: (c) => int(c.seq),
+  focusTab: (c) => int(c.id),
+  copyUrl: bare,
+  toggleDarkMode: bare,
+  clearHistory: bare,
   back: bare,
   forward: bare,
   reload: bare,

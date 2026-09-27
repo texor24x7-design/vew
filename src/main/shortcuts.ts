@@ -1,7 +1,7 @@
 import type { Input } from 'electron'
-import type { Command, FocusUrl } from '../shared/ipc'
+import type { Command } from '../shared/ipc'
 
-export type Shortcut = Command | ({ type: 'focusUrl' } & FocusUrl)
+export type Shortcut = Command | { type: 'focusUrl' }
 
 /**
  * Map a keydown to a browser shortcut. Cmd on macOS, Ctrl on Windows; Ctrl+Tab on both.
@@ -24,15 +24,19 @@ export function shortcutFor(
   if (input.control && key === 'tab') return { type: 'cycle', delta: input.shift ? -1 : 1 }
   const mod = platform === 'darwin' ? input.meta && !input.control : input.control && !input.meta
   if (!mod) return null
-  if (input.shift) return key === 't' ? { type: 'reopen' } : null
+  if (input.shift) {
+    if (key === 't') return { type: 'reopen' }
+    if (key === 'c') return { type: 'copyUrl' }
+    return null
+  }
   if (/^[1-9]$/.test(key)) return { type: 'select', index: key === '9' ? -1 : Number(key) - 1 }
   switch (key) {
     case 't':
-      return { type: 'focusUrl', newTab: true }
+      return { type: 'openPalette' }
     case 's':
       return { type: 'toggleSidebar' }
     case 'l':
-      return { type: 'focusUrl', newTab: false }
+      return { type: 'focusUrl' }
     case 'w':
       return { type: 'close' }
     case 'r':
