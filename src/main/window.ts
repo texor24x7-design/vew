@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   Menu,
   WebContentsView,
@@ -19,13 +20,27 @@ import {
   type BrowserState,
   type Command,
   type NodeState,
+  type Profile,
   type TabState
 } from '../shared/ipc'
 import { PAGE_RADIUS, WIN_TITLEBAR_HEIGHT, clampSidebarWidth, pageBounds } from '../shared/layout'
+import { PRESETS } from '../shared/theme'
 import { toUrl, type SearchEngine } from '../shared/url'
+import { sessionFor } from './profiles'
 import { shortcutFor } from './shortcuts'
-import { ARCHIVE_LIMIT, emptySaved, fromZones, load as loadSaved, save, toZones } from './store'
-import { locate, move, tabsInOrder, type Folder, type Node, type Tab, type Zones } from './tree'
+import { ARCHIVE_LIMIT, emptySaved, fromLive, load as loadSaved, save, toLive } from './store'
+import {
+  locate,
+  move,
+  tabsInOrder,
+  zonesOf,
+  type Folder,
+  type Location,
+  type Node,
+  type Space,
+  type Tab,
+  type Zones
+} from './tree'
 
 const secureWebPreferences = { contextIsolation: true, sandbox: true, nodeIntegration: false }
 const HOME_URL = 'https://www.google.com'
@@ -35,6 +50,8 @@ const REOPEN_LIMIT = 25
 const ARCHIVE_CHECK_MS = 60_000
 const SIDEBAR_ANIM_MS = 180
 const isMac = process.platform === 'darwin'
+/** Default icons for new Spaces, so they're distinguishable in the switcher before being customized. */
+const SPACE_ICONS = ['🏠', '💼', '🌿', '🔥', '🌊', '🎨', '📚', '🚀', '⭐️']
 
 let nextId = 1
 const newId = (): number => nextId++
@@ -58,12 +75,15 @@ const onlyTabs = (list: Node[]): Tab[] => list.filter((n): n is Tab => n.kind ==
 export class VewWindow {
   readonly win: BrowserWindow
   private readonly file = join(app.getPath('userData'), 'sidebar.json')
-  private zones: Zones
+  private favorites: Node[]
+  private spaces: Space[]
+  private activeSpaceId: number
+  private profiles: Profile[]
   private archive: ArchivedTab[]
   private archiveAfterMs: number
   private sidebar: BrowserState['sidebar']
-  private activeId: number | null = null
   private renameId: number | null = null
+  private editSpaceId: number | null = null
   private closedUrls: string[] = []
   private disposed = false
   private saveTimer?: NodeJS.Timeout
@@ -72,8 +92,11 @@ export class VewWindow {
   constructor() {
     const saved = loadSaved(this.file)
     const initial = saved ?? emptySaved()
-    const restored = toZones(initial.zones, newId)
-    this.zones = restored.zones
+    const live = toLive(initial, newId)
+    this.favorites = live.favorites
+    this.spaces = live.spaces
+    this.activeSpaceId = live.activeSpaceId
+    this.profiles = initial.profiles
     this.archive = initial.archive
     this.archiveAfterMs = initial.archiveAfterHours * 3_600_000
     this.sidebar = { ...initial.sidebar, peek: false }
@@ -122,10 +145,14 @@ export class VewWindow {
       clearInterval(this.tween)
       this.save()
       this.disposed = true
-      for (const t of tabsInOrder(this.zones)) if (t.view) closeView(t.view)
+      for (const t of this.allTabs()) if (t.view) closeView(t.view)
     })
 
-    const query = { platform: process.platform }
+    // macOS vibrancy and Windows 11 Mica show through; elsewhere (Windows 10) the shell paints a solid tint.
+    const hasMaterial =
+      isMac ||
+      (process.platform === 'win32' && Number(process.getSystemVersion().split('.')[2]) >= 22000)
+    const query = { platform: process.platform, material: hasMaterial ? '1' : '0' }
     if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
       this.win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}?${new URLSearchParams(query)}`)
     } else {
@@ -134,7 +161,41 @@ export class VewWindow {
     this.updateTrafficLights()
     this.archiveIdle()
     if (!saved) this.openTab(HOME_URL, { activate: true })
-    else if (restored.activeId !== null) this.activate(restored.activeId)
+    else if (this.activeId !== null) this.activate(this.activeId)
+  }
+
+  private get space(): Space {
+    return this.spaces.find((sp) => sp.id === this.activeSpaceId) ?? this.spaces[0]
+  }
+  /** The active Space's sidebar: shared favorites + its pinned and today. */
+  private get zones(): Zones {
+    return zonesOf(this.favorites, this.space)
+  }
+  private get activeId(): number | null {
+    return this.space.activeId
+  }
+  private set activeId(id: number | null) {
+    this.space.activeId = id
+  }
+
+  /** Every tab in every Space (favorites once). */
+  private allTabs(): Tab[] {
+    const none: Node[] = []
+    return [
+      ...tabsInOrder({ favorites: this.favorites, pinned: none, today: none }),
+      ...this.spaces.flatMap((sp) =>
+        tabsInOrder({ favorites: none, pinned: sp.pinned, today: sp.today })
+      )
+    ]
+  }
+
+  /** Locate a node in any Space. Favorites resolve to the active Space. */
+  private find(id: number): { loc: Location; space: Space } | null {
+    for (const space of [this.space, ...this.spaces]) {
+      const loc = locate(zonesOf(this.favorites, space), id)
+      if (loc) return { loc, space }
+    }
+    return null
   }
 
   run(cmd: Command): void {
@@ -205,6 +266,34 @@ export class VewWindow {
         this.updateTrafficLights()
         this.layout(cmd.peek !== undefined)
         return this.push()
+      case 'switchSpace':
+        return this.switchSpace(cmd.id)
+      case 'selectSpace': {
+        const sp = this.spaces[cmd.index]
+        if (sp) this.switchSpace(sp.id)
+        return
+      }
+      case 'stepSpace': {
+        // No wrap-around: swiping past the last Space does nothing.
+        const sp = this.spaces[this.spaces.indexOf(this.space) + cmd.delta]
+        if (sp) this.switchSpace(sp.id)
+        return
+      }
+      case 'newSpace':
+        return this.newSpace()
+      case 'updateSpace':
+        return this.updateSpace(cmd)
+      case 'newProfile': {
+        const sp = this.spaces.find((s) => s.id === cmd.spaceId)
+        if (!sp) return
+        const profile = { id: `p-${Date.now().toString(36)}`, name: sp.name }
+        this.profiles.push(profile)
+        return this.updateSpace({ type: 'updateSpace', id: sp.id, profileId: profile.id })
+      }
+      case 'deleteSpace':
+        return void this.deleteSpace(cmd.id)
+      case 'spaceMenu':
+        return this.spaceMenu(cmd.id)
       case 'back':
         if (wc?.navigationHistory.canGoBack()) wc.navigationHistory.goBack()
         return
@@ -246,6 +335,7 @@ export class VewWindow {
       title: opts.title ?? url,
       favicon: opts.favicon,
       loading: false,
+      profileId: opts.opener?.profileId ?? this.space.profileId,
       lastActive: Date.now(),
       view: null
     }
@@ -259,7 +349,9 @@ export class VewWindow {
 
   private createView(tab: Tab, webContents?: WebContents): WebContentsView {
     const view = new WebContentsView(
-      webContents ? { webContents } : { webPreferences: secureWebPreferences }
+      webContents
+        ? { webContents }
+        : { webPreferences: { ...secureWebPreferences, session: sessionFor(tab.profileId) } }
     )
     view.setBorderRadius(PAGE_RADIUS)
     view.setBackgroundColor('#ffffff')
@@ -331,9 +423,10 @@ export class VewWindow {
   /** Today tabs are removed; pinned tabs and favorites just unload, like Arc. */
   private closeTab(id: number | null): void {
     if (this.disposed || id === null) return
-    const loc = locate(this.zones, id)
-    if (loc?.node.kind !== 'tab') return
-    const tab = loc.node
+    const found = this.find(id)
+    if (found?.loc.node.kind !== 'tab') return
+    const { loc, space } = found
+    const tab = found.loc.node
     if (loc.zone === 'today') {
       loc.list.splice(loc.index, 1)
       this.closedUrls.push(tab.url)
@@ -341,6 +434,11 @@ export class VewWindow {
     }
     tab.lastActive = Date.now()
     this.unload(tab)
+    // A background Space just forgets a removed tab; it has nothing on screen to replace.
+    if (space !== this.space) {
+      if (loc.zone === 'today' && space.activeId === id) space.activeId = null
+      return this.push()
+    }
     if (this.activeId === id) {
       this.activeId = null
       // Fall back to the most recently used tab that is still loaded.
@@ -355,22 +453,132 @@ export class VewWindow {
   /** Move Today tabs untouched for `archiveAfterMs` into the Archive. */
   private archiveIdle(): void {
     const cutoff = Date.now() - this.archiveAfterMs
-    const idle = onlyTabs(this.zones.today).filter(
-      (t) => t.id !== this.activeId && t.lastActive < cutoff
-    )
-    if (!idle.length) return
-    for (const tab of idle) {
-      this.zones.today.splice(this.zones.today.indexOf(tab), 1)
-      this.unload(tab)
-      this.archive.unshift({
-        url: tab.url,
-        title: tab.title,
-        favicon: tab.favicon,
-        archivedAt: Date.now()
-      })
+    let archived = false
+    for (const space of this.spaces) {
+      const idle = onlyTabs(space.today).filter(
+        (t) => t.id !== space.activeId && t.lastActive < cutoff
+      )
+      for (const tab of idle) {
+        space.today.splice(space.today.indexOf(tab), 1)
+        this.unload(tab)
+        this.archive.unshift({
+          url: tab.url,
+          title: tab.title,
+          favicon: tab.favicon,
+          archivedAt: Date.now()
+        })
+        archived = true
+      }
     }
+    if (!archived) return
     this.archive.length = Math.min(this.archive.length, ARCHIVE_LIMIT)
     this.push()
+  }
+
+  private switchSpace(id: number): void {
+    const target = this.spaces.find((sp) => sp.id === id)
+    if (!target || target === this.space) return
+    const prev = this.active()
+    if (prev) prev.lastActive = Date.now()
+    if (prev?.view) this.win.contentView.removeChildView(prev.view)
+    this.activeSpaceId = id
+    if (this.activeId !== null && this.find(this.activeId)) this.activate(this.activeId)
+    else {
+      this.activeId = null
+      this.push()
+    }
+  }
+
+  private newSpace(): void {
+    const n = this.spaces.length + 1
+    const space: Space = {
+      id: newId(),
+      name: `Space ${n}`,
+      icon: SPACE_ICONS[(n - 1) % SPACE_ICONS.length],
+      theme: { colors: PRESETS[(n - 1) % PRESETS.length].colors, intensity: 0.5 },
+      profileId: this.space.profileId,
+      pinned: [],
+      today: [],
+      activeId: null
+    }
+    this.spaces.push(space)
+    this.switchSpace(space.id)
+    this.editSpaceId = space.id
+    this.push()
+    this.editSpaceId = null
+  }
+
+  private updateSpace(cmd: Extract<Command, { type: 'updateSpace' }>): void {
+    const space = this.spaces.find((sp) => sp.id === cmd.id)
+    if (!space) return
+    if (cmd.name !== undefined) space.name = cmd.name.trim() || space.name
+    if (cmd.icon !== undefined) space.icon = cmd.icon.trim() || space.icon
+    if (cmd.theme) space.theme = cmd.theme
+    if (
+      cmd.profileId !== undefined &&
+      cmd.profileId !== space.profileId &&
+      this.profiles.some((p) => p.id === cmd.profileId)
+    ) {
+      // The Space's tabs move to the new profile: unload them so they reopen in its session.
+      space.profileId = cmd.profileId
+      const none: Node[] = []
+      for (const tab of tabsInOrder({
+        favorites: none,
+        pinned: space.pinned,
+        today: space.today
+      })) {
+        tab.profileId = cmd.profileId
+        this.unload(tab)
+      }
+      if (space === this.space && this.activeId !== null) return this.activate(this.activeId)
+    }
+    this.push()
+  }
+
+  private async deleteSpace(id: number): Promise<void> {
+    const space = this.spaces.find((sp) => sp.id === id)
+    if (!space || this.spaces.length === 1) return
+    const { response } = await dialog.showMessageBox(this.win, {
+      type: 'warning',
+      message: `Delete “${space.name}”?`,
+      detail: 'Its pinned and Today tabs will be closed. Favorites are kept.',
+      buttons: ['Delete Space', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1
+    })
+    if (response !== 0 || this.disposed) return
+    if (space === this.space) {
+      const i = this.spaces.indexOf(space)
+      this.switchSpace((this.spaces[i - 1] ?? this.spaces[i + 1]).id)
+    }
+    const none: Node[] = []
+    for (const tab of tabsInOrder({ favorites: none, pinned: space.pinned, today: space.today })) {
+      this.unload(tab)
+    }
+    this.spaces.splice(this.spaces.indexOf(space), 1)
+    this.push()
+  }
+
+  private spaceMenu(id: number): void {
+    const items: MenuItemConstructorOptions[] = [
+      {
+        label: 'Edit Space…',
+        click: () => {
+          this.switchSpace(id)
+          this.editSpaceId = id
+          this.push()
+          this.editSpaceId = null
+        }
+      },
+      { label: 'New Space', click: () => this.newSpace() },
+      { type: 'separator' },
+      {
+        label: 'Delete Space…',
+        enabled: this.spaces.length > 1,
+        click: () => void this.deleteSpace(id)
+      }
+    ]
+    Menu.buildFromTemplate(items).popup({ window: this.win })
   }
 
   private newFolder(parent: Folder | null): void {
@@ -506,7 +714,17 @@ export class VewWindow {
       archive: this.archive,
       activeId: this.activeId,
       sidebar: this.sidebar,
-      renameId: this.renameId
+      renameId: this.renameId,
+      spaces: this.spaces.map(({ id, name, icon, theme, profileId }) => ({
+        id,
+        name,
+        icon,
+        theme,
+        profileId
+      })),
+      activeSpaceId: this.activeSpaceId,
+      profiles: this.profiles,
+      editSpaceId: this.editSpaceId
     }
     this.win.webContents.send(IPC.state, state)
     clearTimeout(this.saveTimer)
@@ -516,7 +734,12 @@ export class VewWindow {
   private save(): void {
     try {
       save(this.file, {
-        zones: fromZones(this.zones, this.activeId),
+        ...fromLive({
+          favorites: this.favorites,
+          spaces: this.spaces,
+          activeSpaceId: this.activeSpaceId
+        }),
+        profiles: this.profiles,
         archive: this.archive,
         sidebar: { width: this.sidebar.width, collapsed: this.sidebar.collapsed },
         archiveAfterHours: this.archiveAfterMs / 3_600_000

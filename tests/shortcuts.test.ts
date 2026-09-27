@@ -43,6 +43,17 @@ for (const [platform, mod] of [
   })
 }
 
+test('space shortcuts: Ctrl+digit on macOS, Alt+digit on Windows', () => {
+  expect(shortcutFor(key('2', { control: true }), 'darwin')).toEqual({
+    type: 'selectSpace',
+    index: 1
+  })
+  expect(shortcutFor(key('2', { alt: true }), 'win32')).toEqual({ type: 'selectSpace', index: 1 })
+  // On Windows Ctrl+digit stays tab selection; on macOS Alt+digit is left for typing.
+  expect(shortcutFor(key('2', { control: true }), 'win32')).toEqual({ type: 'select', index: 1 })
+  expect(shortcutFor(key('2', { alt: true }), 'darwin')).toBeNull()
+})
+
 test('the other platform’s modifier does nothing', () => {
   expect(shortcutFor(key('w', { control: true }), 'darwin')).toBeNull()
   expect(shortcutFor(key('w', { meta: true }), 'win32')).toBeNull()

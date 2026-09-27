@@ -1,3 +1,5 @@
+import { isTheme, type Theme } from './theme'
+
 /** Every IPC channel and payload between main and the shell/overlay renderers. */
 export const IPC = {
   /** shell → main: a Command */
@@ -49,8 +51,23 @@ export interface SidebarState {
   peek: boolean
 }
 
+export interface SpaceState {
+  id: number
+  name: string
+  icon: string
+  theme: Theme
+  profileId: string
+}
+
+export interface Profile {
+  id: string
+  name: string
+}
+
 export interface BrowserState {
+  /** Shared by every Space. */
   favorites: TabState[]
+  /** Pinned and Today belong to the active Space. */
   pinned: NodeState[]
   today: TabState[]
   archive: ArchivedTab[]
@@ -58,6 +75,11 @@ export interface BrowserState {
   sidebar: SidebarState
   /** Folder whose name the shell should start editing. */
   renameId: number | null
+  spaces: SpaceState[]
+  activeSpaceId: number
+  profiles: Profile[]
+  /** Space whose editor the shell should open. */
+  editSpaceId: number | null
 }
 
 /** Ask the shell to focus the URL pill; `newTab` means Enter opens a new tab. */
@@ -87,6 +109,21 @@ export type Command =
   | { type: 'restore'; index: number }
   | { type: 'toggleSidebar' }
   | { type: 'sidebar'; width?: number; peek?: boolean }
+  | { type: 'switchSpace'; id: number }
+  | { type: 'selectSpace'; index: number }
+  | { type: 'stepSpace'; delta: 1 | -1 }
+  | { type: 'newSpace' }
+  | {
+      type: 'updateSpace'
+      id: number
+      name?: string
+      icon?: string
+      theme?: Theme
+      profileId?: string
+    }
+  | { type: 'newProfile'; spaceId: number }
+  | { type: 'deleteSpace'; id: number }
+  | { type: 'spaceMenu'; id: number }
   | { type: 'back' }
   | { type: 'forward' }
   | { type: 'reload' }
@@ -120,6 +157,19 @@ const validators: { [K in Command['type']]: (c: Record<string, unknown>) => bool
   sidebar: (c) =>
     opt(c.width, (v) => typeof v === 'number' && Number.isFinite(v)) &&
     opt(c.peek, (v) => typeof v === 'boolean'),
+  switchSpace: (c) => int(c.id),
+  selectSpace: (c) => int(c.index),
+  stepSpace: (c) => c.delta === 1 || c.delta === -1,
+  newSpace: bare,
+  updateSpace: (c) =>
+    int(c.id) &&
+    opt(c.name, (v) => str(v, 100)) &&
+    opt(c.icon, (v) => str(v, 16)) &&
+    opt(c.theme, isTheme) &&
+    opt(c.profileId, (v) => str(v, 100)),
+  newProfile: (c) => int(c.spaceId),
+  deleteSpace: (c) => int(c.id),
+  spaceMenu: (c) => int(c.id),
   back: bare,
   forward: bare,
   reload: bare,
@@ -143,5 +193,9 @@ export const EMPTY_STATE: BrowserState = {
   archive: [],
   activeId: null,
   sidebar: { width: 240, collapsed: false, peek: false },
-  renameId: null
+  renameId: null,
+  spaces: [],
+  activeSpaceId: 0,
+  profiles: [],
+  editSpaceId: null
 }

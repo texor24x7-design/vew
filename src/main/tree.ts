@@ -1,5 +1,6 @@
 import type { WebContentsView } from 'electron'
 import type { Where, Zone } from '../shared/ipc'
+import type { Theme } from '../shared/theme'
 
 export interface Tab {
   kind: 'tab'
@@ -8,6 +9,8 @@ export interface Tab {
   title: string
   favicon?: string
   loading: boolean
+  /** Profile (Chromium session) the page runs in. Kept when a tab moves, e.g. into Favorites. */
+  profileId: string
   /** Last time this tab was the active one (ms). Drives auto-archiving. */
   lastActive: number
   /** Created lazily on first activation; null for unloaded tabs. */
@@ -24,6 +27,25 @@ export interface Folder {
 
 export type Node = Tab | Folder
 export type Zones = Record<Zone, Node[]>
+
+export interface Space {
+  id: number
+  name: string
+  icon: string
+  theme: Theme
+  profileId: string
+  pinned: Node[]
+  today: Node[]
+  /** The tab this Space shows; each Space remembers its own. */
+  activeId: number | null
+}
+
+/** A Space's view of the sidebar: shared favorites plus its own pinned and today lists (same arrays, not copies). */
+export const zonesOf = (favorites: Node[], space: Space): Zones => ({
+  favorites,
+  pinned: space.pinned,
+  today: space.today
+})
 
 /** Folders nest one level: a top-level folder may hold subfolders, which hold only tabs. */
 const MAX_FOLDER_LEVEL = 2

@@ -1,16 +1,18 @@
 import { copyFileSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import type { ArchivedTab, Zone } from '../shared/ipc'
-import { ZONES } from '../shared/ipc'
+import type { ArchivedTab, Profile } from '../shared/ipc'
 import { SIDEBAR_DEFAULT_WIDTH, clampSidebarWidth } from '../shared/layout'
-import type { Node, Zones } from './tree'
+import { DEFAULT_THEME, isTheme, type Theme } from '../shared/theme'
+import type { Node, Space } from './tree'
 
 interface SavedTab {
   kind: 'tab'
   url: string
   title: string
   favicon?: string
+  profileId?: string
   lastActive: number
-  active?: boolean
+  /** Indexes of the Spaces showing this tab (a favorite can be active in several). */
+  activeIn?: number[]
 }
 interface SavedFolder {
   kind: 'folder'
@@ -20,8 +22,20 @@ interface SavedFolder {
 }
 type SavedNode = SavedTab | SavedFolder
 
+interface SavedSpace {
+  name: string
+  icon: string
+  theme: Theme
+  profileId: string
+  pinned: SavedNode[]
+  today: SavedNode[]
+}
+
 export interface Saved {
-  zones: Record<Zone, SavedNode[]>
+  favorites: SavedNode[]
+  spaces: SavedSpace[]
+  activeSpace: number
+  profiles: Profile[]
   archive: ArchivedTab[]
   sidebar: { width: number; collapsed: boolean }
   /** Hours of inactivity before a today tab is archived. Edited by hand until the Phase 6 settings page. */
@@ -29,9 +43,23 @@ export interface Saved {
 }
 
 export const ARCHIVE_LIMIT = 200
+export const DEFAULT_PROFILE: Profile = { id: 'default', name: 'Personal' }
+
+export const newSavedSpace = (overrides: Partial<SavedSpace> = {}): SavedSpace => ({
+  name: 'Personal',
+  icon: '🏠',
+  theme: DEFAULT_THEME,
+  profileId: DEFAULT_PROFILE.id,
+  pinned: [],
+  today: [],
+  ...overrides
+})
 
 export const emptySaved = (): Saved => ({
-  zones: { favorites: [], pinned: [], today: [] },
+  favorites: [],
+  spaces: [newSavedSpace()],
+  activeSpace: 0,
+  profiles: [DEFAULT_PROFILE],
   archive: [],
   sidebar: { width: SIDEBAR_DEFAULT_WIDTH, collapsed: false },
   archiveAfterHours: 12
@@ -43,6 +71,9 @@ const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
 const text = (v: unknown, fallback = ''): string => (typeof v === 'string' ? v : fallback)
 const num = (v: unknown, fallback: number): number =>
   typeof v === 'number' && Number.isFinite(v) ? v : fallback
+/** Profile ids become partition names, so keep them to a safe alphabet. */
+export const isProfileId = (v: unknown): v is string =>
+  typeof v === 'string' && /^[a-z0-9-]{1,40}$/.test(v)
 
 function sanitizeNode(v: unknown): SavedNode | null {
   if (!isObj(v)) return null
@@ -53,29 +84,55 @@ function sanitizeNode(v: unknown): SavedNode | null {
     return { kind: 'folder', name: text(v.name, 'Folder'), open: v.open !== false, children }
   }
   if (typeof v.url !== 'string' || !v.url) return null
+  const activeIn = v.active === true ? [0] : arr(v.activeIn).filter(Number.isInteger)
   return {
     kind: 'tab',
     url: v.url,
     title: text(v.title, v.url),
     favicon: typeof v.favicon === 'string' ? v.favicon : undefined,
+    profileId: isProfileId(v.profileId) ? v.profileId : undefined,
     lastActive: num(v.lastActive, Date.now()),
-    active: v.active === true
+    ...(activeIn.length && { activeIn: activeIn as number[] })
   }
 }
+
+const nodes = (v: unknown): SavedNode[] =>
+  arr(v)
+    .map(sanitizeNode)
+    .filter((n) => n !== null)
+const tabsOnly = (v: unknown): SavedNode[] => nodes(v).filter((n) => n.kind === 'tab')
 
 /** Parse the saved file defensively; anything malformed is dropped rather than trusted. */
 export function sanitize(v: unknown): Saved {
   const s = emptySaved()
   if (!isObj(v)) return s
-  const zones = isObj(v.zones) ? v.zones : {}
-  for (const zone of ZONES) {
-    s.zones[zone] = arr(zones[zone])
-      .map(sanitizeNode)
-      .filter((n) => n !== null)
+
+  s.profiles = arr(v.profiles)
+    .filter((p): p is Obj => isObj(p) && isProfileId(p.id))
+    .map((p) => ({ id: p.id as string, name: text(p.name, 'Profile') }))
+  if (!s.profiles.some((p) => p.id === DEFAULT_PROFILE.id)) s.profiles.unshift(DEFAULT_PROFILE)
+  const profileIds = new Set(s.profiles.map((p) => p.id))
+
+  if (Array.isArray(v.spaces)) {
+    s.favorites = tabsOnly(v.favorites)
+    s.spaces = v.spaces.filter(isObj).map((sp) =>
+      newSavedSpace({
+        name: text(sp.name, 'Space').slice(0, 100),
+        icon: text(sp.icon, '✨').slice(0, 16),
+        theme: isTheme(sp.theme) ? sp.theme : DEFAULT_THEME,
+        profileId: profileIds.has(sp.profileId as string) ? (sp.profileId as string) : 'default',
+        pinned: nodes(sp.pinned),
+        today: tabsOnly(sp.today)
+      })
+    )
+  } else if (isObj(v.zones)) {
+    // Phase 2 format: one implicit Space.
+    s.favorites = tabsOnly(v.zones.favorites)
+    s.spaces = [newSavedSpace({ pinned: nodes(v.zones.pinned), today: tabsOnly(v.zones.today) })]
   }
-  // Only pinned may hold folders.
-  s.zones.favorites = s.zones.favorites.filter((n) => n.kind === 'tab')
-  s.zones.today = s.zones.today.filter((n) => n.kind === 'tab')
+  if (!s.spaces.length) s.spaces = [newSavedSpace()]
+  s.activeSpace = Math.min(Math.max(0, Math.trunc(num(v.activeSpace, 0))), s.spaces.length - 1)
+
   s.archive = arr(v.archive)
     .filter((a): a is Obj => isObj(a) && typeof a.url === 'string')
     .slice(0, ARCHIVE_LIMIT)
@@ -113,47 +170,89 @@ export function save(file: string, s: Saved): void {
   renameSync(`${file}.tmp`, file)
 }
 
-/** Live tree → saved tree. */
-export function fromZones(zones: Zones, activeId: number | null): Saved['zones'] {
-  const conv = (n: Node): SavedNode =>
-    n.kind === 'folder'
-      ? { kind: 'folder', name: n.name, open: n.open, children: n.children.map(conv) }
-      : {
-          kind: 'tab',
-          url: n.url,
-          title: n.title,
-          favicon: n.favicon,
-          lastActive: n.lastActive,
-          ...(n.id === activeId && { active: true })
-        }
+type Live = { favorites: Node[]; spaces: Space[]; activeSpaceId: number }
+
+/** Live model → saved shape (everything except profiles/archive/sidebar settings). */
+export function fromLive(live: Live): Pick<Saved, 'favorites' | 'spaces' | 'activeSpace'> {
+  const conv = (n: Node): SavedNode => {
+    if (n.kind === 'folder') {
+      return { kind: 'folder', name: n.name, open: n.open, children: n.children.map(conv) }
+    }
+    const activeIn = live.spaces.flatMap((sp, i) => (sp.activeId === n.id ? [i] : []))
+    return {
+      kind: 'tab',
+      url: n.url,
+      title: n.title,
+      favicon: n.favicon,
+      profileId: n.profileId,
+      lastActive: n.lastActive,
+      ...(activeIn.length && { activeIn })
+    }
+  }
   return {
-    favorites: zones.favorites.map(conv),
-    pinned: zones.pinned.map(conv),
-    today: zones.today.map(conv)
+    favorites: live.favorites.map(conv),
+    spaces: live.spaces.map((sp) => ({
+      name: sp.name,
+      icon: sp.icon,
+      theme: sp.theme,
+      profileId: sp.profileId,
+      pinned: sp.pinned.map(conv),
+      today: sp.today.map(conv)
+    })),
+    activeSpace: Math.max(
+      0,
+      live.spaces.findIndex((sp) => sp.id === live.activeSpaceId)
+    )
   }
 }
 
-/** Saved tree → live tree (all tabs unloaded). Returns the id of the tab that was active. */
-export function toZones(
-  saved: Saved['zones'],
-  newId: () => number
-): { zones: Zones; activeId: number | null } {
-  let activeId: number | null = null
-  const conv = (n: SavedNode): Node => {
-    const id = newId()
-    if (n.kind === 'folder') {
-      return { kind: 'folder', id, name: n.name, open: n.open, children: n.children.map(conv) }
+/** Saved shape → live model, all tabs unloaded. */
+export function toLive(saved: Saved, newId: () => number): Live {
+  const spaces: Space[] = saved.spaces.map((sp) => ({
+    id: newId(),
+    name: sp.name,
+    icon: sp.icon,
+    theme: sp.theme,
+    profileId: sp.profileId,
+    pinned: [],
+    today: [],
+    activeId: null
+  }))
+  const conv =
+    (fallbackProfile: string) =>
+    (n: SavedNode): Node => {
+      const id = newId()
+      if (n.kind === 'folder') {
+        return {
+          kind: 'folder',
+          id,
+          name: n.name,
+          open: n.open,
+          children: n.children.map(conv(fallbackProfile))
+        }
+      }
+      for (const i of n.activeIn ?? []) if (spaces[i]) spaces[i].activeId = id
+      const { url, title, favicon, lastActive } = n
+      const profileId =
+        n.profileId && saved.profiles.some((p) => p.id === n.profileId)
+          ? n.profileId
+          : fallbackProfile
+      return {
+        kind: 'tab',
+        id,
+        url,
+        title,
+        favicon,
+        profileId,
+        lastActive,
+        loading: false,
+        view: null
+      }
     }
-    if (n.active) activeId = id
-    const { url, title, favicon, lastActive } = n
-    return { kind: 'tab', id, url, title, favicon, lastActive, loading: false, view: null }
-  }
-  return {
-    zones: {
-      favorites: saved.favorites.map(conv),
-      pinned: saved.pinned.map(conv),
-      today: saved.today.map(conv)
-    },
-    activeId
-  }
+  const favorites = saved.favorites.map(conv(DEFAULT_PROFILE.id))
+  saved.spaces.forEach((sp, i) => {
+    spaces[i].pinned = sp.pinned.map(conv(sp.profileId))
+    spaces[i].today = sp.today.map(conv(sp.profileId))
+  })
+  return { favorites, spaces, activeSpaceId: spaces[saved.activeSpace].id }
 }

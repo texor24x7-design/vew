@@ -161,9 +161,9 @@ export function Tabs({
             >
               <NodeList nodes={state.pinned} zone="pinned" parent={null} />
             </Zone>
-            <div className="mx-2 h-px shrink-0 bg-black/10 dark:bg-white/10" />
+            <div className="mx-2 h-px shrink-0 bg-(--line)" />
             <button
-              className="flex h-8 shrink-0 items-center gap-2 rounded-lg px-2 text-neutral-500 hover:bg-black/5 dark:text-neutral-400 dark:hover:bg-white/10"
+              className="flex h-8 shrink-0 items-center gap-2 rounded-lg px-2 text-(--muted) hover:bg-(--hover)"
               onClick={onNewTab}
             >
               <Plus {...icon} />
@@ -177,7 +177,7 @@ export function Tabs({
       </StateCtx.Provider>
       <DragOverlay dropAnimation={null}>
         {dragged && (
-          <div className="flex h-8 w-52 items-center gap-2 rounded-lg bg-white/90 px-2 text-[13px] shadow-lg dark:bg-neutral-800/90">
+          <div className="flex h-8 w-52 items-center gap-2 rounded-lg bg-white/90 px-2 text-[13px] text-neutral-800 shadow-lg dark:bg-neutral-800/90 dark:text-neutral-100">
             {dragged.kind === 'tab' ? <Favicon tab={dragged} /> : <Folder {...icon} />}
             <span className="truncate">
               {dragged.kind === 'tab' ? dragged.title : dragged.name}
@@ -210,10 +210,8 @@ function Zone(props: {
       {props.children}
       {showHint && (
         <div
-          className={`grid h-8 place-items-center rounded-lg border border-dashed text-[12px] text-neutral-500 ${
-            drop?.target === id
-              ? 'border-blue-500 bg-blue-500/10'
-              : 'border-black/15 dark:border-white/20'
+          className={`grid h-8 place-items-center rounded-lg border border-dashed text-[12px] text-(--muted) ${
+            drop?.target === id ? 'border-blue-500 bg-blue-500/10' : 'border-(--line)'
           }`}
         >
           {props.hint}
@@ -295,7 +293,7 @@ function Favicon({ tab }: { tab: { favicon?: string } }): React.JSX.Element {
   return tab.favicon ? (
     <img src={tab.favicon} alt="" className="size-4 shrink-0 rounded-sm" draggable={false} />
   ) : (
-    <Globe {...icon} className="shrink-0 text-neutral-400" />
+    <Globe {...icon} className="shrink-0 text-(--muted)" />
   )
 }
 
@@ -314,9 +312,7 @@ function TabRow({ tab, slot }: { tab: TabState; slot: Slot }): React.JSX.Element
       ref={setNodeRef}
       {...handlers}
       className={`group relative flex shrink-0 cursor-default items-center gap-2 rounded-lg px-2 outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 ${
-        active
-          ? 'bg-white/80 shadow-sm dark:bg-white/15'
-          : 'hover:bg-black/5 dark:hover:bg-white/10'
+        active ? 'bg-(--active) shadow-sm' : 'hover:bg-(--hover)'
       } ${tab.loading ? 'shimmer overflow-hidden' : ''}`}
       onClick={() => send({ type: 'activate', id: tab.id })}
       onAuxClick={(e) => e.button === 1 && send({ type: 'close', id: tab.id })}
@@ -327,14 +323,12 @@ function TabRow({ tab, slot }: { tab: TabState; slot: Slot }): React.JSX.Element
       title={tab.title}
     >
       <Favicon tab={tab} />
-      <span
-        className={`min-w-0 flex-1 truncate ${tab.loaded || active ? '' : 'text-neutral-500 dark:text-neutral-400'}`}
-      >
+      <span className={`min-w-0 flex-1 truncate ${tab.loaded || active ? '' : 'text-(--muted)'}`}>
         {tab.title}
       </span>
       {closable && (
         <button
-          className="grid size-5 shrink-0 place-items-center rounded text-neutral-500 opacity-0 group-hover:opacity-100 hover:bg-black/10 dark:hover:bg-white/15"
+          className="grid size-5 shrink-0 place-items-center rounded text-(--muted) opacity-0 group-hover:opacity-100 hover:bg-(--hover)"
           aria-label={slot.zone === 'today' ? 'Close tab' : 'Unload tab'}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
@@ -375,7 +369,7 @@ function FolderItem({ folder, slot }: { folder: FolderState; slot: Slot }): Reac
       <div
         ref={setNodeRef}
         {...handlers}
-        className={`relative flex h-8 cursor-default items-center gap-1.5 rounded-lg px-2 text-neutral-600 outline-none hover:bg-black/5 focus-visible:ring-2 focus-visible:ring-blue-500/60 dark:text-neutral-300 dark:hover:bg-white/10 ${
+        className={`relative flex h-8 cursor-default items-center gap-1.5 rounded-lg px-2 text-(--fg) outline-none hover:bg-(--hover) focus-visible:ring-2 focus-visible:ring-blue-500/60 ${
           pos === 'into' ? 'bg-blue-500/10 ring-1 ring-blue-500' : ''
         }`}
         onClick={() => !editing && send({ type: 'toggleFolder', id: folder.id })}
@@ -466,7 +460,7 @@ function Favorites({
     <div
       ref={setNodeRef}
       className={`grid shrink-0 grid-cols-4 gap-1.5 rounded-xl ${
-        !tabs.length ? 'min-h-10 border border-dashed border-black/15 dark:border-white/20' : ''
+        !tabs.length ? 'min-h-10 border border-dashed border-(--line)' : ''
       } ${drop?.target === 'end-favorites' ? 'bg-blue-500/10 ring-1 ring-blue-500' : ''}`}
     >
       {tabs.map((tab, index) => (
@@ -477,7 +471,7 @@ function Favorites({
         />
       ))}
       {!tabs.length && (
-        <span className="col-span-4 grid place-items-center text-[12px] text-neutral-500">
+        <span className="col-span-4 grid place-items-center text-[12px] text-(--muted)">
           Drop to add to Favorites
         </span>
       )}
@@ -498,9 +492,7 @@ function FavoriteTile({ tab, slot }: { tab: TabState; slot: Slot }): React.JSX.E
       aria-label={tab.title}
       title={tab.title}
       className={`relative grid h-10 place-items-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 ${
-        active
-          ? 'bg-white/80 shadow-sm dark:bg-white/15'
-          : 'bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15'
+        active ? 'bg-(--active) shadow-sm' : 'bg-(--fill) hover:bg-(--hover)'
       } ${tab.loading ? 'shimmer overflow-hidden' : ''}`}
       onClick={() => send({ type: 'activate', id: tab.id })}
       onContextMenu={(e) => {
@@ -525,7 +517,7 @@ function timeAgo(ms: number): string {
 export function ArchiveList({ items }: { items: ArchivedTab[] }): React.JSX.Element {
   if (!items.length) {
     return (
-      <p className="px-2 py-6 text-center text-[12px] text-neutral-500 dark:text-neutral-400">
+      <p className="px-2 py-6 text-center text-[12px] text-(--muted)">
         Today tabs you haven’t used in a while move here.
       </p>
     )
@@ -535,15 +527,13 @@ export function ArchiveList({ items }: { items: ArchivedTab[] }): React.JSX.Elem
       {items.map((item, index) => (
         <li key={`${item.archivedAt}-${index}`}>
           <button
-            className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left hover:bg-black/5 dark:hover:bg-white/10"
+            className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left hover:bg-(--hover)"
             title={item.url}
             onClick={() => send({ type: 'restore', index })}
           >
             <Favicon tab={item} />
             <span className="min-w-0 flex-1 truncate">{item.title}</span>
-            <span className="shrink-0 text-[12px] text-neutral-500 dark:text-neutral-400">
-              {timeAgo(item.archivedAt)}
-            </span>
+            <span className="shrink-0 text-[12px] text-(--muted)">{timeAgo(item.archivedAt)}</span>
           </button>
         </li>
       ))}

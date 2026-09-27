@@ -6,6 +6,7 @@ const tab = (id: number): Tab => ({
   id,
   url: `u${id}`,
   title: `t${id}`,
+  profileId: 'default',
   loading: false,
   lastActive: 0,
   view: null
