@@ -1,6 +1,6 @@
 import { join, normalize } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, session } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, net, protocol, session, shell } from 'electron'
 import {
   IPC,
   isInternalRequest,
@@ -121,9 +121,14 @@ async function handle(req: InternalRequest, hooks: InternalHooks): Promise<unkno
       settings.update((s) => Object.assign(s, req.patch))
       return settingsView(hooks)
     case 'makeDefaultBrowser':
-      // ponytail: in development this registers the Electron binary; packaged builds register Vew (Phase 9).
-      app.setAsDefaultProtocolClient('http')
-      app.setAsDefaultProtocolClient('https')
+      // Windows 10+ only lets the user choose, in Settings (the installer registers Vew there).
+      if (process.platform === 'win32') {
+        await shell.openExternal('ms-settings:defaultapps?registeredAppUser=Vew')
+      } else {
+        // In development this registers the Electron binary; packaged builds register Vew.
+        app.setAsDefaultProtocolClient('http')
+        app.setAsDefaultProtocolClient('https')
+      }
       return settingsView(hooks)
     case 'open':
       return hooks.openUrl(req.url)

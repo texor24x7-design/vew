@@ -1,0 +1,67 @@
+# Packaging for macOS (.dmg, universal) and Windows (NSIS .exe, x64 + arm64). See RELEASING.md.
+appId: vew.texor.app
+productName: Vew
+copyright: Copyright © 2026 Texor
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**
+  - resources/**
+  - package.json
+asarUnpack: []
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  # The shell and overlay load from file:// with ES modules, which needs file:'s extra privileges.
+  grantFileProtocolExtraPrivileges: true
+
+# Vew is a browser: http/https links and .html files can open in it.
+protocols:
+  - name: Web URL
+    schemes: [http, https]
+    role: Viewer
+fileAssociations:
+  - ext: [html, htm, xhtml]
+    name: HTML document
+    role: Viewer
+
+mac:
+  target:
+    - target: dmg
+      arch: universal
+    - target: zip # electron-updater installs updates from the zip
+      arch: universal
+  category: public.app-category.productivity
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Notarized when APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID are set (CI secrets).
+  notarize: true
+  extendInfo:
+    NSCameraUsageDescription: Websites you allow can use your camera, for example for Talk calls.
+    NSMicrophoneUsageDescription: Websites you allow can use your microphone, for example for Talk calls.
+    NSLocationWhenInUseUsageDescription: Websites you allow can see your approximate location.
+dmg:
+  artifactName: Vew-${version}-mac.${ext}
+
+win:
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+  executableName: Vew
+nsis:
+  artifactName: Vew-${version}-win-${arch}-setup.${ext}
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  include: build/installer.nsh
+  shortcutName: Vew
+
+publish:
+  provider: github
+  releaseType: draft

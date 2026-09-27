@@ -1,6 +1,7 @@
-import { mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { app, BrowserWindow, nativeTheme, session } from 'electron'
 import { loadBlocker } from './adblock'
 import { registerInternalScheme, serveInternalPages } from './internal'
@@ -8,6 +9,7 @@ import { installMenu } from './menu'
 import { MiniWindow } from './mini'
 import { settings } from './settings'
 import { refreshAccounts } from './texor'
+import { installUpdate, startUpdates } from './updater'
 import { VewWindow } from './window'
 
 registerInternalScheme()
@@ -35,6 +37,14 @@ const mainWindow = (): VewWindow => {
 
 // Only real web links: never file:, javascript: or custom schemes passed in by other apps.
 const isWebUrl = (v: unknown): v is string => typeof v === 'string' && /^https?:\/\//i.test(v)
+/** An .html file handed over by the OS (Windows passes its path as an argument). */
+const isHtmlFile = (v: unknown): v is string =>
+  typeof v === 'string' && /\.x?html?$/i.test(v) && existsSync(v)
+/** A link or an .html file from the command line (Windows), as a URL to open. */
+const linkIn = (argv: string[]): string | undefined => {
+  const file = argv.slice(1).find(isHtmlFile)
+  return argv.find(isWebUrl) ?? (file && pathToFileURL(file).href)
+}
 const pending: string[] = []
 /** Links from other apps open in a mini window (like Little Arc). */
 const openLink = (url: string): void => {
@@ -47,13 +57,18 @@ app.on('open-url', (e, url) => {
   e.preventDefault()
   if (isWebUrl(url)) openLink(url)
 })
+// …and .html files opened with Vew (Finder, "Open With").
+app.on('open-file', (e, path) => {
+  e.preventDefault()
+  if (isHtmlFile(path)) openLink(pathToFileURL(path).href)
+})
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   // Windows: opening a link while Vew runs starts a second instance with the URL in its arguments.
   app.on('second-instance', (_e, argv) => {
-    const url = argv.find(isWebUrl)
+    const url = linkIn(argv)
     if (url) return openLink(url)
     const win = mainWindow().win
     if (win.isMinimized()) win.restore()
@@ -88,14 +103,27 @@ if (!app.requestSingleInstanceLock()) {
     })
     void loadBlocker()
     void refreshAccounts()
-    installMenu(
-      (cmd) => mainWindow().run(cmd),
-      (w) => main !== null && w === main.win
-    )
+    const menu = (update?: { version: string; install: () => void }): void =>
+      installMenu(
+        (cmd) => mainWindow().run(cmd),
+        (w) => main !== null && w === main.win,
+        update
+      )
+    menu()
+    startUpdates((version) => {
+      menu({ version, install: installUpdate })
+      mainWindow().toast(`Vew ${version} is ready. It installs when you quit.`)
+    })
+    // The footage's CC BY credits live here, in About Vew, rather than on onboarding.
+    app.setAboutPanelOptions({
+      applicationName: 'Vew',
+      credits:
+        'Vew by Texor.\n\nOnboarding footage from Wikimedia Commons: “Aerial view of sand beach” by Nature video, HD – 4K and “Aerial views of forest in Russia” by Flykit production (CC BY 3.0); “Ocean surface waves 06” by Mostafameraji (CC0); US Forest Service and BLM Oregon & Washington (public domain).'
+    })
     mainWindow()
     // Launched to open a link (Windows passes it as an argument; macOS queued it above).
-    for (const url of [...process.argv.slice(1).filter(isWebUrl), ...pending.splice(0)])
-      openLink(url)
+    const launchLink = linkIn(process.argv)
+    for (const url of [...(launchLink ? [launchLink] : []), ...pending.splice(0)]) openLink(url)
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) mainWindow()
     })

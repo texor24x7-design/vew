@@ -1560,7 +1560,7 @@ export class VewWindow {
     if (this.focusTarget === 'page') this.active()?.view?.webContents.focus()
   }
 
-  private toast(message: string): void {
+  toast(message: string): void {
     if (!this.disposed) this.win.webContents.send(IPC.toast, message)
   }
 

@@ -8,7 +8,9 @@ import type { Command } from '../shared/ipc'
  */
 export function installMenu(
   run: (cmd: Command) => void,
-  isVewWindow: (w: BrowserWindow | null) => boolean
+  isVewWindow: (w: BrowserWindow | null) => boolean,
+  /** A downloaded update: offer to restart into it. */
+  update?: { version: string; install: () => void }
 ): void {
   const isMac = process.platform === 'darwin'
   // Page actions only make sense in the browser window; other windows (mini window, pop-outs) ignore them.
@@ -21,6 +23,12 @@ export function installMenu(
     else w?.close()
   }
   const settings = act({ type: 'openInternal', page: 'settings' })
+  const restart: MenuItemConstructorOptions[] = update
+    ? [
+        { label: `Restart to Update to ${update.version}`, click: update.install },
+        { type: 'separator' }
+      ]
+    : []
 
   const template: MenuItemConstructorOptions[] = [
     ...(isMac
@@ -30,6 +38,7 @@ export function installMenu(
             submenu: [
               { role: 'about' },
               { type: 'separator' },
+              ...restart,
               { label: 'Settings…', accelerator: 'Cmd+,', click: settings },
               { type: 'separator' },
               { role: 'services' },
@@ -46,6 +55,7 @@ export function installMenu(
     {
       label: 'File',
       submenu: [
+        ...(isMac ? [] : restart),
         { label: 'New Tab', accelerator: 'CmdOrCtrl+T', click: act({ type: 'openPalette' }) },
         {
           label: 'Reopen Closed Tab',
