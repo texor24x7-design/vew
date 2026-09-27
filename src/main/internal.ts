@@ -46,13 +46,26 @@ export interface InternalHooks {
 export function serveInternalPages(hooks: InternalHooks): void {
   const root = join(__dirname, '../renderer')
   session.defaultSession.protocol.handle('vew', (req) => {
-    const { host, pathname } = new URL(req.url)
+    const { host, pathname, search } = new URL(req.url)
     if (!(INTERNAL_PAGES as readonly string[]).includes(host)) {
       return new Response('Not found', { status: 404 })
     }
-    const path = pathname === '/' ? '/internal/index.html' : pathname
+    // The page lives at the root of vew://<page>/, but its files are in the renderer's internal/ folder:
+    // "/" is its index.html, and its own relative references ("./main.tsx") belong in that folder too.
+    const path =
+      pathname === '/'
+        ? '/internal/index.html'
+        : /^\/[^/@]+$/.test(pathname)
+          ? `/internal${pathname}`
+          : pathname
     const dev = !app.isPackaged && process.env['ELECTRON_RENDERER_URL']
-    if (dev) return net.fetch(`${dev}${path}`)
+    // Development: the Vite dev server, keeping the query (Vite's module versions).
+    if (dev) {
+      // Only Accept matters to Vite (e.g. CSS imported from code vs. a stylesheet); other headers here
+      // belong to the vew: request and would make the forwarded fetch fail.
+      const accept = req.headers.get('accept')
+      return net.fetch(`${dev}${path}${search}`, accept ? { headers: { accept } } : undefined)
+    }
     const file = normalize(join(root, path))
     if (!file.startsWith(root)) return new Response('Not found', { status: 404 }) // no ../ escapes
     return net.fetch(pathToFileURL(file).toString())

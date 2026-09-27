@@ -42,6 +42,21 @@ export default defineConfig({
         }
       }
     },
-    plugins: [react(), tailwindcss()]
+    // Live reload for vew:// pages in development: their socket must go to the dev server on localhost,
+    // which their CSP otherwise blocks. Development only; built pages keep the strict policy.
+    server: { hmr: { host: 'localhost' } },
+    plugins: [
+      react(),
+      tailwindcss(),
+      {
+        name: 'vew-dev-csp',
+        apply: 'serve',
+        transformIndexHtml: (html) =>
+          html.replace(
+            "default-src 'self';",
+            "default-src 'self'; connect-src 'self' ws://localhost:*;"
+          )
+      }
+    ]
   }
 })
