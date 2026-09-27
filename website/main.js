@@ -6,7 +6,7 @@
  */
 
 // The GitHub repository Vew's releases are published to (the same one as package.json → repository).
-const REPO = 'OWNER/vew'
+const REPO = 'texor24x7-design/vew'
 
 const latest = (file) => `https://github.com/${REPO}/releases/latest/download/${file}`
 const LINKS = {
