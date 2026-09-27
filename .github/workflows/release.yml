@@ -10,7 +10,21 @@ permissions:
   contents: write
 
 jobs:
+  # One draft release, made before the builds: if each build made its own, macOS and Windows would end up
+  # in two separate drafts for the same tag.
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --draft --title "${GITHUB_REF_NAME#v}" --notes ""
+
   release:
+    needs: draft
     strategy:
       fail-fast: false
       matrix:

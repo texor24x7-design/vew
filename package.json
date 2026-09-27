@@ -1,7 +1,7 @@
 {
   "name": "vew",
   "productName": "Vew",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Vew, the browser for the Texor family",
   "main": "./out/main/index.js",
   "private": true,
