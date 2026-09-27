@@ -55,6 +55,41 @@ test('space shortcuts: Ctrl+digit on macOS, Alt+digit on Windows', () => {
   expect(shortcutFor(key('2', { alt: true }), 'darwin')).toBeNull()
 })
 
+test('browser essentials shortcuts on both platforms', () => {
+  for (const [platform, mod] of [
+    ['darwin', 'meta'],
+    ['win32', 'control']
+  ] as const) {
+    const m = { [mod]: true }
+    expect(shortcutFor(key('f', m), platform)).toEqual({ type: 'openFind' })
+    expect(shortcutFor(key('p', m), platform)).toEqual({ type: 'print' })
+    expect(shortcutFor(key('=', m), platform)).toEqual({ type: 'zoom', delta: 1 })
+    expect(shortcutFor(key('+', { ...m, shift: true }), platform)).toEqual({
+      type: 'zoom',
+      delta: 1
+    })
+    expect(shortcutFor(key('-', m), platform)).toEqual({ type: 'zoom', delta: -1 })
+    expect(shortcutFor(key('0', m), platform)).toEqual({ type: 'zoom', delta: 0 })
+    expect(shortcutFor(key(',', m), platform)).toEqual({ type: 'openInternal', page: 'settings' })
+    // Option/Alt changes the character on macOS, so match the physical key.
+    expect(shortcutFor({ ...key('ˆ', { ...m, alt: true }), code: 'KeyI' }, platform)).toEqual({
+      type: 'devtools'
+    })
+    expect(shortcutFor({ ...key('ü', { ...m, alt: true }), code: 'KeyU' }, platform)).toEqual({
+      type: 'viewSource'
+    })
+  }
+  expect(shortcutFor(key('y', { meta: true }), 'darwin')).toEqual({
+    type: 'openInternal',
+    page: 'history'
+  })
+  expect(shortcutFor(key('h', { control: true }), 'win32')).toEqual({
+    type: 'openInternal',
+    page: 'history'
+  })
+  expect(shortcutFor(key('h', { meta: true }), 'darwin')).toBeNull() // Cmd+H is "Hide" on macOS
+})
+
 test('the other platform’s modifier does nothing', () => {
   expect(shortcutFor(key('w', { control: true }), 'darwin')).toBeNull()
   expect(shortcutFor(key('w', { meta: true }), 'win32')).toBeNull()

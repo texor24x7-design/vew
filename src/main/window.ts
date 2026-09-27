@@ -8,6 +8,7 @@ import {
   Menu,
   nativeTheme,
   net,
+  session,
   WebContentsView,
   type Event,
   type Input,
@@ -26,6 +27,7 @@ import {
   type PaletteData,
   type PaletteTab,
   type PeekInfo,
+  type SiteInfo,
   type Snapshot,
   type Profile,
   type TabState,
@@ -45,7 +47,12 @@ import {
 } from '../shared/layout'
 import { PRESETS } from '../shared/theme'
 import { toUrl, type SearchEngine } from '../shared/url'
-import { History } from './history'
+import { blockedOn, blockerEvents, resetBlocked } from './adblock'
+import { clearDownloads, downloadAction, downloadList, downloads } from './downloads'
+import { history } from './history'
+import { isInternalUrl } from './internal'
+import { originOf } from './permissions'
+import { settings } from './settings'
 import { sessionFor } from './profiles'
 import { shortcutFor } from './shortcuts'
 import { ARCHIVE_LIMIT, emptySaved, fromLive, load as loadSaved, save, toLive } from './store'
@@ -69,8 +76,22 @@ export const secureWebPreferences = {
   nodeIntegration: false
 }
 const HOME_URL = 'https://www.google.com'
-// ponytail: fixed engine; the Phase 6 settings page will store the user's choice.
-const SEARCH_ENGINE: SearchEngine = 'google'
+const engine = (): SearchEngine => settings.get().searchEngine
+const ENGINE_NAMES: Record<SearchEngine, string> = {
+  google: 'Google',
+  duckduckgo: 'DuckDuckGo',
+  bing: 'Bing'
+}
+/** Each engine's suggestion endpoint; all answer [query, [suggestions…]]. */
+const SUGGEST_URLS: Record<SearchEngine, (q: string) => string> = {
+  google: (q) =>
+    `https://suggestqueries.google.com/complete/search?client=firefox&ie=utf-8&oe=utf-8&q=${q}`,
+  duckduckgo: (q) => `https://duckduckgo.com/ac/?type=list&q=${q}`,
+  bing: (q) => `https://api.bing.com/osjson.aspx?query=${q}`
+}
+/** Chrome's zoom steps. */
+const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3]
+const FIND_BAR = { width: 340, height: 48 }
 const REOPEN_LIMIT = 25
 const ARCHIVE_CHECK_MS = 60_000
 const SIDEBAR_ANIM_MS = 180
@@ -78,30 +99,39 @@ const isMac = process.platform === 'darwin'
 /** Default icons for new Spaces, so they're distinguishable in the switcher before being customized. */
 const SPACE_ICONS = ['🏠', '💼', '🌿', '🔥', '🌊', '🎨', '📚', '🚀', '⭐️']
 
-let historyDb: History | undefined
-/** One history database for the app, opened on first use. */
-export const history = (): History => {
-  if (!historyDb) {
-    historyDb = new History(join(app.getPath('userData'), 'history.db'))
-    app.once('will-quit', () => historyDb?.close())
-  }
-  return historyDb
-}
-
-// ponytail: Google suggestions only, matching the fixed engine; follow the engine setting in Phase 6.
+/** Search suggestions from the chosen engine. */
 async function suggest(query: string): Promise<string[]> {
   const q = query.trim()
   if (!q) return []
   try {
-    const res = await net.fetch(
-      `https://suggestqueries.google.com/complete/search?client=firefox&ie=utf-8&oe=utf-8&q=${encodeURIComponent(q)}`,
-      { signal: AbortSignal.timeout(1500) }
-    )
+    const res = await net.fetch(SUGGEST_URLS[engine()](encodeURIComponent(q)), {
+      signal: AbortSignal.timeout(1500)
+    })
     const body: unknown = await res.json()
     const list = Array.isArray(body) ? body[1] : null
     return Array.isArray(list) ? list.filter((s) => typeof s === 'string').slice(0, 5) : []
   } catch {
     return [] // offline or slow: the bar still works from local data
+  }
+}
+
+/** Picture-in-picture for a playing video when its tab leaves the screen, and back when it returns.
+ * Runs in an isolated world so the page's own scripts can't interfere. */
+const PIP_ENTER = `(() => {
+  const v = [...document.querySelectorAll('video')].find((v) => !v.paused && !v.ended && v.readyState > 2 && !v.disablePictureInPicture)
+  if (v && document.pictureInPictureEnabled && !document.pictureInPictureElement) v.requestPictureInPicture().catch(() => {})
+})()`
+const PIP_EXIT = `document.pictureInPictureElement && document.exitPictureInPicture().catch(() => {})`
+const inIsolation = (wc: WebContents, code: string): void => {
+  if (!wc.isDestroyed())
+    void wc.executeJavaScriptInIsolatedWorld(999, [{ code }], true).catch(() => {})
+}
+
+const hostOf = (url: string): string => {
+  try {
+    return new URL(url).host
+  } catch {
+    return ''
   }
 }
 
@@ -150,6 +180,9 @@ export class VewWindow {
   private shown: WebContentsView[] = []
   /** A sidebar tab is being dragged: page views are detached so the shell sees the pointer over the page. */
   private dragging = false
+  /** The find bar is showing (the overlay shrinks to just the bar, so the page stays usable). */
+  private findOpen = false
+  private pushTimer?: NodeJS.Timeout
   /** Peek: a link from a pinned tab or favorite, floating over the page. */
   private peek: { view: WebContentsView; from: Tab; info: Omit<PeekInfo, 'rect'> } | null = null
   private paletteFallback?: NodeJS.Timeout
@@ -159,7 +192,6 @@ export class VewWindow {
   private activeSpaceId: number
   private profiles: Profile[]
   private archive: ArchivedTab[]
-  private archiveAfterMs: number
   private sidebar: BrowserState['sidebar']
   private renameId: number | null = null
   private editSpaceId: number | null = null
@@ -177,7 +209,6 @@ export class VewWindow {
     this.activeSpaceId = live.activeSpaceId
     this.profiles = initial.profiles
     this.archive = initial.archive
-    this.archiveAfterMs = initial.archiveAfterHours * 3_600_000
     this.sidebar = { ...initial.sidebar, peek: false }
 
     this.win = new BrowserWindow({
@@ -219,6 +250,25 @@ export class VewWindow {
       if ((e.sender === shell || e.sender === overlay) && isCommand(cmd)) this.run(cmd)
     }
     ipcMain.on(IPC.command, onCommand)
+    // Settings, downloads and the blocker all change what the sidebar shows.
+    const unsubscribe = settings.subscribe(() => this.push())
+    const onDownloads = (): void => this.schedulePush()
+    const onDownloaded = (d: { filename: string; state: string }): void => {
+      if (d.state === 'completed') this.toast(`Downloaded ${d.filename}`)
+    }
+    const onBlocked = (id: number): void => {
+      if (this.active()?.view?.webContents.id === id) this.schedulePush()
+    }
+    downloads.on('change', onDownloads)
+    downloads.on('done', onDownloaded)
+    blockerEvents.on('blocked', onBlocked)
+    this.win.on('closed', () => {
+      unsubscribe()
+      downloads.off('change', onDownloads)
+      downloads.off('done', onDownloaded)
+      blockerEvents.off('blocked', onBlocked)
+      clearTimeout(this.pushTimer)
+    })
     ipcMain.handle(IPC.suggest, (e, query: unknown) =>
       e.sender === overlay && typeof query === 'string' && query.length <= 200 ? suggest(query) : []
     )
@@ -325,14 +375,17 @@ export class VewWindow {
     const wc = active?.view?.webContents
     switch (cmd.type) {
       case 'open': {
-        const url = toUrl(cmd.input, SEARCH_ENGINE)
+        const url = toUrl(cmd.input, engine())
         if (url) this.openTab(url, { activate: true })
         return
       }
       case 'navigate': {
-        const url = toUrl(cmd.input, SEARCH_ENGINE)
+        const url = toUrl(cmd.input, engine())
         if (!url) return
-        if (!wc) return this.run({ type: 'open', input: cmd.input })
+        // Internal pages and websites never share a tab (they run in different sessions).
+        if (!wc || !active || isInternalUrl(url) !== isInternalUrl(active.url)) {
+          return this.run({ type: 'open', input: cmd.input })
+        }
         load(wc, url)
         wc.focus()
         return
@@ -438,9 +491,8 @@ export class VewWindow {
         )
         return
       case 'toggleDarkMode': {
-        // ponytail: not persisted yet; the Phase 6 appearance setting will store it.
         const dark = !nativeTheme.shouldUseDarkColors
-        nativeTheme.themeSource = dark ? 'dark' : 'light'
+        settings.update((s) => void (s.appearance = dark ? 'dark' : 'light'))
         return this.toast(dark ? 'Dark mode on' : 'Light mode on')
       }
       case 'clearHistory':
@@ -470,6 +522,85 @@ export class VewWindow {
         return this.expandPeek()
       case 'peekClose':
         return this.closePeek()
+      case 'openFind':
+        if (!wc || !active || isInternalUrl(active.url)) return
+        this.closePeek()
+        if (this.paletteOpen) this.closePalette()
+        this.findOpen = true
+        this.present()
+        this.sendFind({ active: 0, total: 0 })
+        this.overlay.webContents.focus()
+        return
+      case 'find':
+        if (!wc) return
+        if (!cmd.text) {
+          wc.stopFindInPage('clearSelection')
+          return this.sendFind({ active: 0, total: 0 })
+        }
+        wc.findInPage(cmd.text, { forward: cmd.forward, findNext: !cmd.next })
+        return
+      case 'closeFind':
+        return this.closeFind()
+      case 'zoom': {
+        if (!wc || !active) return
+        const host = hostOf(active.url)
+        const current = wc.getZoomFactor()
+        const i = ZOOM_STEPS.findIndex((z) => z >= current - 0.001)
+        const next =
+          cmd.delta === 0
+            ? 1
+            : ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, Math.max(0, (i < 0 ? 7 : i) + cmd.delta))]
+        wc.setZoomFactor(next)
+        if (host) {
+          settings.update((s) => {
+            if (next === 1) delete s.zoom[host]
+            else s.zoom[host] = next
+          })
+        }
+        return this.toast(`Zoom ${Math.round(next * 100)}%`)
+      }
+      case 'print':
+        return wc?.print()
+      case 'viewSource':
+        if (active && /^https?:/.test(active.url))
+          this.openTab(`view-source:${active.url}`, { activate: true })
+        return
+      case 'devtools':
+        if (!wc) return
+        return wc.isDevToolsOpened() ? wc.closeDevTools() : wc.openDevTools({ mode: 'detach' })
+      case 'openInternal': {
+        const url = `vew://${cmd.page}/`
+        const existing = tabsInOrder(this.zones).find((t) => t.url.startsWith(`vew://${cmd.page}`))
+        if (existing) return this.activate(existing.id)
+        this.openTab(url, {
+          activate: true,
+          title: cmd.page === 'history' ? 'History' : 'Settings'
+        })
+        return
+      }
+      case 'setPermission': {
+        const origin = originOf(cmd.origin)
+        if (!origin) return
+        return settings.update((s) => {
+          const p = (s.permissions[origin] ??= {})
+          if (cmd.value === 'ask') delete p[cmd.kind]
+          else p[cmd.kind] = cmd.value
+          if (!Object.keys(p).length) delete s.permissions[origin]
+        })
+      }
+      case 'setSiteBlocker': {
+        settings.update((s) => {
+          s.blockerAllowlist = s.blockerAllowlist.filter((h) => h !== cmd.host)
+          if (!cmd.enabled) s.blockerAllowlist.push(cmd.host)
+        })
+        // Takes effect on the next load.
+        if (active && hostOf(active.url) === cmd.host) wc?.reload()
+        return
+      }
+      case 'download':
+        return downloadAction(cmd.id, cmd.action)
+      case 'clearDownloads':
+        return clearDownloads()
       case 'back':
         if (wc?.navigationHistory.canGoBack()) wc.navigationHistory.goBack()
         return
@@ -531,7 +662,15 @@ export class VewWindow {
         : new WebContentsView(
             source
               ? { webContents: source }
-              : { webPreferences: { ...secureWebPreferences, session: sessionFor(tab.profileId) } }
+              : {
+                  webPreferences: isInternalUrl(tab.url)
+                    ? {
+                        ...secureWebPreferences,
+                        session: session.defaultSession,
+                        preload: join(__dirname, '../preload/internal.js')
+                      }
+                    : { ...secureWebPreferences, session: sessionFor(tab.profileId) }
+                }
           )
     view.setBorderRadius(PAGE_RADIUS)
     view.setBackgroundColor('#ffffff')
@@ -552,6 +691,30 @@ export class VewWindow {
     wc.on('did-navigate', (_e, url) => {
       update({ url, favicon: undefined })
       history().visit(url)
+      this.applyZoom(wc, url)
+    })
+    wc.on('did-start-navigation', (e) => {
+      if (e.isMainFrame && !e.isSameDocument) resetBlocked(wc.id)
+    })
+    // An internal page (privileged preload) must never show a website, and a website never an internal page.
+    const internal = isInternalUrl(tab.url)
+    const guard = (e: Electron.Event<{ url: string; isMainFrame: boolean }>): void => {
+      if (!e.isMainFrame || isInternalUrl(e.url) === internal) return
+      e.preventDefault()
+      if (internal && /^https?:/.test(e.url)) this.openTab(e.url, { activate: true })
+    }
+    wc.on('will-navigate', guard)
+    wc.on('will-redirect', guard)
+    wc.on('found-in-page', (_e, result) => {
+      if (result.finalUpdate && tab.id === this.activeId) {
+        this.sendFind({ active: result.activeMatchOrdinal, total: result.matches })
+      }
+    })
+    // A crashed page on screen reloads itself rather than leaving a blank pane.
+    wc.on('render-process-gone', (_e, details) => {
+      if (details.reason === 'clean-exit' || !this.shown.includes(view)) return
+      this.toast('The page crashed and was reloaded')
+      wc.reload()
     })
     wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
       if (!isMainFrame) return
@@ -571,6 +734,10 @@ export class VewWindow {
     wc.on('destroyed', () => tab.view === view && this.closeTab(tab.id))
     // window.open and target=_blank become Vew tabs. Adopting Chromium's WebContents keeps window.opener working.
     wc.setWindowOpenHandler((details) => {
+      if (internal) {
+        if (/^https?:/.test(details.url)) this.openTab(details.url, { activate: true })
+        return { action: 'deny' }
+      }
       // Links from pinned tabs and favorites that would open a new tab Peek instead, like Arc.
       // Popups (window.open with features, e.g. sign-in) stay real tabs so window.opener keeps working.
       const zone = this.find(tab.id)?.loc.zone
@@ -611,11 +778,35 @@ export class VewWindow {
     const prev = this.active()
     const now = Date.now()
     if (prev) prev.lastActive = now
+    if (prev !== node) this.closeFind()
     this.activeId = id
     node.lastActive = now
     this.present()
+    // A video playing in the tab we just left keeps going in picture-in-picture.
+    if (prev?.view && !this.shown.includes(prev.view)) inIsolation(prev.view.webContents, PIP_ENTER)
+    if (node.view) inIsolation(node.view.webContents, PIP_EXIT)
     if (!this.paletteOpen && !this.peek) node.view?.webContents.focus()
     this.push()
+  }
+
+  private applyZoom(wc: WebContents, url: string): void {
+    const factor = settings.get().zoom[hostOf(url)] ?? 1
+    if (Math.abs(wc.getZoomFactor() - factor) > 0.001) wc.setZoomFactor(factor)
+  }
+
+  private sendFind(state: { active: number; total: number } | null): void {
+    const wc = this.overlay.webContents
+    if (wc.isLoading()) wc.once('did-finish-load', () => wc.send(IPC.find, state))
+    else wc.send(IPC.find, state)
+  }
+
+  private closeFind(): void {
+    if (!this.findOpen) return
+    this.findOpen = false
+    this.active()?.view?.webContents.stopFindInPage('clearSelection')
+    this.sendFind(null)
+    this.present()
+    this.active()?.view?.webContents.focus()
   }
 
   private tabById(id: number): Tab | undefined {
@@ -686,7 +877,8 @@ export class VewWindow {
     const views = this.dragging ? [] : this.visibleTabs().map((t) => this.ensureView(t))
     for (const v of this.shown) if (!views.includes(v)) this.win.contentView.removeChildView(v)
     for (const v of views) this.win.contentView.addChildView(v)
-    if (this.paletteOpen || this.peek) this.win.contentView.addChildView(this.overlay)
+    if (this.paletteOpen || this.peek || this.findOpen)
+      this.win.contentView.addChildView(this.overlay)
     else this.win.contentView.removeChildView(this.overlay)
     if (this.peek) this.win.contentView.addChildView(this.peek.view)
     this.shown = views
@@ -709,12 +901,17 @@ export class VewWindow {
       return this.present()
     }
     const panes = this.shown.map((v) => ({ view: v, rect: v.getBounds() }))
-    const snaps: Snapshot[] = await Promise.all(
-      panes.map(async ({ view, rect }) => ({
-        ...rect,
-        src: (await view.webContents.capturePage()).toDataURL()
-      }))
-    )
+    // A capture can fail (e.g. the display is asleep); the drag still works, just without the pictures.
+    const snaps: Snapshot[] = (
+      await Promise.all(
+        panes.map(({ view, rect }) =>
+          view.webContents
+            .capturePage()
+            .then((img) => ({ ...rect, src: img.toDataURL() }))
+            .catch(() => null)
+        )
+      )
+    ).filter((s) => s !== null)
     if (this.disposed) return
     this.win.webContents.send(IPC.snapshot, snaps)
     this.dragging = true
@@ -770,7 +967,7 @@ export class VewWindow {
 
   /** Move Today tabs untouched for `archiveAfterMs` into the Archive. */
   private archiveIdle(): void {
-    const cutoff = Date.now() - this.archiveAfterMs
+    const cutoff = Date.now() - settings.get().archiveAfterHours * 3_600_000
     let archived = false
     for (const space of this.spaces) {
       const idle = onlyTabs(space.today).filter(
@@ -1023,9 +1220,10 @@ export class VewWindow {
       tabs,
       history: history().recent(5000),
       activeSpaceId: this.activeSpaceId,
-      searchEngine: 'Google'
+      searchEngine: ENGINE_NAMES[engine()]
     }
     this.closePeek()
+    this.closeFind()
     this.paletteOpen = true
     this.present()
     const wc = this.overlay.webContents
@@ -1053,6 +1251,7 @@ export class VewWindow {
 
   private openPeek(url: string, from: Tab): void {
     this.closePeek()
+    this.closeFind()
     const view = new WebContentsView({
       webPreferences: { ...secureWebPreferences, session: sessionFor(from.profileId) }
     })
@@ -1154,15 +1353,26 @@ export class VewWindow {
   private layout(animate = false): void {
     clearInterval(this.tween)
     const [width, height] = this.win.getContentSize()
-    this.overlay.setBounds({ x: 0, y: 0, width, height })
     const card = pageBounds(width, height, process.platform, this.sidebar)
+    const active = this.active()
+    const split = active && this.splitOf(active.id)
+    const rects: Rect[] = split ? splitRects(card, split.direction, split.sizes) : [card]
+    // Full window for the command bar and Peek; just the bar (top-right of the active pane) for find.
+    const pane = rects[this.shown.findIndex((v) => v === active?.view)] ?? card
+    this.overlay.setBounds(
+      this.paletteOpen || this.peek
+        ? { x: 0, y: 0, width, height }
+        : {
+            x: pane.x + pane.width - FIND_BAR.width - 12,
+            y: pane.y + 12,
+            width: FIND_BAR.width,
+            height: FIND_BAR.height
+          }
+    )
     if (this.peek) {
       this.peek.view.setBounds(peekRect(card))
       this.sendPeek()
     }
-    const active = this.active()
-    const split = active && this.splitOf(active.id)
-    const rects: Rect[] = split ? splitRects(card, split.direction, split.sizes) : [card]
     const targets = this.shown.map((view, i) => ({ view, to: rects[i] ?? card }))
     if (!animate) return targets.forEach(({ view, to }) => view.setBounds(to))
     const froms = targets.map(({ view }) => view.getBounds())
@@ -1228,11 +1438,38 @@ export class VewWindow {
       split: (() => {
         const split = this.activeId === null ? undefined : this.splitOf(this.activeId)
         return split ? { ...split, tabIds: [...split.tabIds], sizes: [...split.sizes] } : null
-      })()
+      })(),
+      downloads: downloadList(),
+      site: this.siteInfo()
     }
     this.win.webContents.send(IPC.state, state)
     clearTimeout(this.saveTimer)
     this.saveTimer = setTimeout(() => this.save(), 500)
+  }
+
+  /** For noisy sources (download progress, blocked requests): at most a few pushes a second. */
+  private schedulePush(): void {
+    this.pushTimer ??= setTimeout(() => {
+      this.pushTimer = undefined
+      this.push()
+    }, 250)
+  }
+
+  private siteInfo(): SiteInfo | null {
+    const active = this.active()
+    const origin = active && originOf(active.url)
+    if (!active || !origin) return null
+    const s = settings.get()
+    const host = new URL(origin).host
+    return {
+      origin,
+      host,
+      secure: origin.startsWith('https:'),
+      permissions: s.permissions[origin] ?? {},
+      blocker: s.blocker && !s.blockerAllowlist.includes(host),
+      blocked: active.view ? blockedOn(active.view.webContents.id) : 0,
+      zoomPercent: Math.round((active.view?.webContents.getZoomFactor() ?? 1) * 100)
+    }
   }
 
   private save(): void {
@@ -1246,7 +1483,7 @@ export class VewWindow {
         profiles: this.profiles,
         archive: this.archive,
         sidebar: { width: this.sidebar.width, collapsed: this.sidebar.collapsed },
-        archiveAfterHours: this.archiveAfterMs / 3_600_000
+        archiveAfterHours: settings.get().archiveAfterHours
       })
     } catch (err) {
       console.error('saving sidebar failed:', err)

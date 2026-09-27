@@ -1,5 +1,6 @@
 import type { Rect, SplitDirection } from './layout'
 import { isTheme, type Theme } from './theme'
+import { SEARCH_ENGINES, type SearchEngine } from './url'
 
 /** Every IPC channel and payload between main and the shell/overlay renderers. */
 export const IPC = {
@@ -24,7 +25,11 @@ export const IPC = {
   /** main → mini window toolbar: MiniInfo */
   miniInfo: 'vew:mini-info',
   /** mini window toolbar → main: MiniAction */
-  miniAction: 'vew:mini-action'
+  miniAction: 'vew:mini-action',
+  /** main → overlay: FindState to show the find bar, or null to hide it */
+  find: 'vew:find',
+  /** internal vew:// page → main (invoke): InternalRequest → result */
+  internal: 'vew:internal'
 } as const
 
 /** favorites: icon grid shared across Spaces; pinned: persistent tree with folders; today: auto-archiving. */
@@ -114,6 +119,110 @@ export interface MiniInfo {
 export type MiniAction = 'move' | 'close'
 export const isMiniAction = (v: unknown): v is MiniAction => v === 'move' || v === 'close'
 
+export type PermissionKind = 'camera' | 'microphone' | 'geolocation' | 'notifications'
+export type PermissionValue = 'allow' | 'block'
+
+export interface Settings {
+  searchEngine: SearchEngine
+  archiveAfterHours: number
+  /** Built-in ad and tracker blocking. */
+  blocker: boolean
+  appearance: 'system' | 'light' | 'dark'
+  /** Hosts where the blocker is turned off. */
+  blockerAllowlist: string[]
+  /** Zoom factor per host (1 = 100%). */
+  zoom: Record<string, number>
+  /** Remembered permission decisions per origin. */
+  permissions: Record<string, Partial<Record<PermissionKind, PermissionValue>>>
+}
+
+export interface DownloadState {
+  id: string
+  filename: string
+  path: string
+  received: number
+  total: number
+  state: 'progressing' | 'completed' | 'cancelled' | 'interrupted'
+  startTime: number
+}
+
+/** The active page, for the site-info popover behind the lock icon. */
+export interface SiteInfo {
+  origin: string
+  host: string
+  secure: boolean
+  permissions: Partial<Record<PermissionKind, PermissionValue>>
+  blocker: boolean
+  blocked: number
+  zoomPercent: number
+}
+
+/** Find-in-page result for the find bar: match `active` of `total`. */
+export interface FindState {
+  active: number
+  total: number
+}
+
+export interface HistoryEntry {
+  url: string
+  title: string
+  visits: number
+  lastVisit: number
+}
+
+/** Requests from the internal pages (vew://history, vew://settings). */
+export type InternalRequest =
+  | { method: 'historySearch'; query: string; before?: number; limit: number }
+  | { method: 'historyDelete'; url: string }
+  | { method: 'historyClear' }
+  | { method: 'getSettings' }
+  | {
+      method: 'setSettings'
+      patch: Partial<
+        Pick<Settings, 'searchEngine' | 'archiveAfterHours' | 'blocker' | 'appearance'>
+      >
+    }
+  | { method: 'makeDefaultBrowser' }
+  | { method: 'open'; url: string }
+
+export interface SettingsView {
+  settings: Settings
+  isDefaultBrowser: boolean
+}
+
+export function isInternalRequest(x: unknown): x is InternalRequest {
+  if (typeof x !== 'object' || x === null) return false
+  const r = x as Record<string, unknown>
+  switch (r.method) {
+    case 'historySearch':
+      return (
+        str(r.query, 500) &&
+        opt(r.before, (v) => typeof v === 'number') &&
+        Number.isInteger(r.limit) &&
+        (r.limit as number) > 0 &&
+        (r.limit as number) <= 500
+      )
+    case 'historyDelete':
+    case 'open':
+      return str(r.url)
+    case 'historyClear':
+    case 'getSettings':
+    case 'makeDefaultBrowser':
+      return true
+    case 'setSettings': {
+      if (typeof r.patch !== 'object' || r.patch === null) return false
+      const p = r.patch as Record<string, unknown>
+      return (
+        opt(p.searchEngine, (v) => typeof v === 'string' && Object.hasOwn(SEARCH_ENGINES, v)) &&
+        opt(p.archiveAfterHours, (v) => typeof v === 'number' && v >= 0.01 && v <= 24 * 365) &&
+        opt(p.blocker, (v) => typeof v === 'boolean') &&
+        opt(p.appearance, (v) => v === 'system' || v === 'light' || v === 'dark')
+      )
+    }
+  }
+  return false
+}
+
 export interface BrowserState {
   /** Shared by every Space. */
   favorites: TabState[]
@@ -132,6 +241,8 @@ export interface BrowserState {
   editSpaceId: number | null
   /** The split view the active tab is in, if any. */
   split: SplitState | null
+  downloads: DownloadState[]
+  site: SiteInfo | null
 }
 
 /** A tab as the command bar sees it (from any Space). */
@@ -214,6 +325,18 @@ export type Command =
   | { type: 'dragging'; on: boolean }
   | { type: 'peekExpand' }
   | { type: 'peekClose' }
+  | { type: 'openFind' }
+  | { type: 'find'; text: string; forward: boolean; next: boolean }
+  | { type: 'closeFind' }
+  | { type: 'zoom'; delta: 1 | -1 | 0 }
+  | { type: 'print' }
+  | { type: 'viewSource' }
+  | { type: 'devtools' }
+  | { type: 'openInternal'; page: 'history' | 'settings' }
+  | { type: 'setPermission'; origin: string; kind: PermissionKind; value: PermissionValue | 'ask' }
+  | { type: 'setSiteBlocker'; host: string; enabled: boolean }
+  | { type: 'download'; id: string; action: 'open' | 'show' | 'cancel' | 'remove' }
+  | { type: 'clearDownloads' }
   | { type: 'back' }
   | { type: 'forward' }
   | { type: 'reload' }
@@ -278,6 +401,22 @@ const validators: { [K in Command['type']]: (c: Record<string, unknown>) => bool
   dragging: (c) => typeof c.on === 'boolean',
   peekExpand: bare,
   peekClose: bare,
+  openFind: bare,
+  find: (c) => str(c.text, 1000) && typeof c.forward === 'boolean' && typeof c.next === 'boolean',
+  closeFind: bare,
+  zoom: (c) => c.delta === 1 || c.delta === -1 || c.delta === 0,
+  print: bare,
+  viewSource: bare,
+  devtools: bare,
+  openInternal: (c) => c.page === 'history' || c.page === 'settings',
+  setPermission: (c) =>
+    str(c.origin, 300) &&
+    ['camera', 'microphone', 'geolocation', 'notifications'].includes(c.kind as string) &&
+    ['allow', 'block', 'ask'].includes(c.value as string),
+  setSiteBlocker: (c) => str(c.host, 253) && typeof c.enabled === 'boolean',
+  download: (c) =>
+    str(c.id, 64) && ['open', 'show', 'cancel', 'remove'].includes(c.action as string),
+  clearDownloads: bare,
   back: bare,
   forward: bare,
   reload: bare,
@@ -306,5 +445,7 @@ export const EMPTY_STATE: BrowserState = {
   activeSpaceId: 0,
   profiles: [],
   editSpaceId: null,
-  split: null
+  split: null,
+  downloads: [],
+  site: null
 }

@@ -23,7 +23,8 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, 'src/preload/index.ts'),
           overlay: resolve(__dirname, 'src/preload/overlay.ts'),
-          mini: resolve(__dirname, 'src/preload/mini.ts')
+          mini: resolve(__dirname, 'src/preload/mini.ts'),
+          internal: resolve(__dirname, 'src/preload/internal.ts')
         }
       }
     }
@@ -35,7 +36,8 @@ export default defineConfig({
         input: {
           shell: resolve(__dirname, 'src/renderer/shell/index.html'),
           overlay: resolve(__dirname, 'src/renderer/overlay/index.html'),
-          mini: resolve(__dirname, 'src/renderer/mini/index.html')
+          mini: resolve(__dirname, 'src/renderer/mini/index.html'),
+          internal: resolve(__dirname, 'src/renderer/internal/index.html')
         }
       }
     },

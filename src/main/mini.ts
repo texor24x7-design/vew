@@ -3,7 +3,8 @@ import { BrowserWindow, ipcMain, Menu, WebContentsView, type IpcMainEvent } from
 import { IPC, isMiniAction, type MiniAction, type MiniInfo } from '../shared/ipc'
 import { WIN_TITLEBAR_HEIGHT } from '../shared/layout'
 import { sessionFor } from './profiles'
-import { closeView, history, load, loadPage, secureWebPreferences, type VewWindow } from './window'
+import { history } from './history'
+import { closeView, load, loadPage, secureWebPreferences, type VewWindow } from './window'
 
 const TOOLBAR = 40
 const isMac = process.platform === 'darwin'

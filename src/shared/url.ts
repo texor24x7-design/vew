@@ -6,7 +6,7 @@ export const SEARCH_ENGINES = {
 export type SearchEngine = keyof typeof SEARCH_ENGINES
 
 // javascript: is deliberately absent, so typing it searches instead of running script.
-const SCHEME = /^(https?|file|about|chrome|view-source|data):/i
+const SCHEME = /^(https?|file|about|chrome|view-source|data|vew):/i
 const LOCAL_HOST = /^(localhost|\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:]+\])(:\d+)?$/i
 const DOMAIN = /^([a-z0-9-]+\.)+[a-z][a-z0-9-]+(:\d+)?$/i
 

@@ -77,7 +77,64 @@ const ACTIONS: Action[] = [
     hint: `${MOD}R`,
     command: { type: 'reload' }
   },
-  { id: 'new-folder', title: 'New folder', url: 'pinned folder', command: { type: 'newFolder' } }
+  { id: 'new-folder', title: 'New folder', url: 'pinned folder', command: { type: 'newFolder' } },
+  {
+    id: 'history',
+    title: 'History',
+    url: 'visited pages',
+    hint: isMac ? '⌘Y' : 'Ctrl+H',
+    command: { type: 'openInternal', page: 'history' }
+  },
+  {
+    id: 'settings',
+    title: 'Settings',
+    url: 'preferences options',
+    hint: `${MOD},`,
+    command: { type: 'openInternal', page: 'settings' }
+  },
+  {
+    id: 'find',
+    title: 'Find in page',
+    url: 'search text',
+    hint: `${MOD}F`,
+    command: { type: 'openFind' }
+  },
+  { id: 'print', title: 'Print', url: 'pdf', hint: `${MOD}P`, command: { type: 'print' } },
+  {
+    id: 'zoom-in',
+    title: 'Zoom in',
+    url: 'bigger larger',
+    hint: `${MOD}+`,
+    command: { type: 'zoom', delta: 1 }
+  },
+  {
+    id: 'zoom-out',
+    title: 'Zoom out',
+    url: 'smaller',
+    hint: `${MOD}−`,
+    command: { type: 'zoom', delta: -1 }
+  },
+  {
+    id: 'zoom-reset',
+    title: 'Actual size',
+    url: 'zoom reset 100',
+    hint: `${MOD}0`,
+    command: { type: 'zoom', delta: 0 }
+  },
+  {
+    id: 'view-source',
+    title: 'View page source',
+    url: 'html code',
+    hint: isMac ? '⌥⌘U' : 'Ctrl+Alt+U',
+    command: { type: 'viewSource' }
+  },
+  {
+    id: 'devtools',
+    title: 'Developer tools',
+    url: 'inspect console devtools',
+    hint: isMac ? '⌥⌘I' : 'Ctrl+Alt+I',
+    command: { type: 'devtools' }
+  }
 ]
 
 interface Row {

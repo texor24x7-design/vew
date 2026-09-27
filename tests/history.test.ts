@@ -16,6 +16,12 @@ test('records visits, counts repeats, keeps titles, orders by recency, clears', 
     { url: 'https://a.com/', title: 'A', visits: 2, lastVisit: 3 },
     { url: 'https://b.com/', title: 'B', visits: 1, lastVisit: 2 }
   ])
+  expect(h.search('b', 10).map((i) => i.url)).toEqual(['https://b.com/'])
+  expect(h.search('', 1).map((i) => i.url)).toEqual(['https://a.com/'])
+  expect(h.search('', 10, 3).map((i) => i.url)).toEqual(['https://b.com/']) // paging by time
+  expect(h.search('100%_', 10)).toEqual([]) // LIKE wildcards in the query are literal
+  h.delete('https://a.com/')
+  expect(h.recent().map((i) => i.url)).toEqual(['https://b.com/'])
   h.clear()
   expect(h.recent()).toEqual([])
   h.close()

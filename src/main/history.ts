@@ -1,4 +1,6 @@
+import { join } from 'node:path'
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
+import { app } from 'electron'
 
 export interface HistoryItem {
   url: string
@@ -15,6 +17,8 @@ export class History {
   private readonly visitStmt: StatementSync
   private readonly titleStmt: StatementSync
   private readonly recentStmt: StatementSync
+  private readonly searchStmt: StatementSync
+  private readonly deleteStmt: StatementSync
 
   constructor(file: string) {
     this.db = new DatabaseSync(file)
@@ -36,6 +40,12 @@ export class History {
         title = CASE WHEN excluded.title = '' THEN title ELSE excluded.title END
     `)
     this.titleStmt = this.db.prepare(`UPDATE history SET title = ? WHERE url = ?`)
+    this.searchStmt = this.db.prepare(
+      `SELECT url, title, visits, last_visit AS lastVisit FROM history
+       WHERE last_visit < ? AND (title LIKE ? ESCAPE '\\' OR url LIKE ? ESCAPE '\\')
+       ORDER BY last_visit DESC LIMIT ?`
+    )
+    this.deleteStmt = this.db.prepare(`DELETE FROM history WHERE url = ?`)
     this.recentStmt = this.db.prepare(
       `SELECT url, title, visits, last_visit AS lastVisit FROM history ORDER BY last_visit DESC LIMIT ?`
     )
@@ -54,6 +64,16 @@ export class History {
     return this.recentStmt.all(limit) as unknown as HistoryItem[]
   }
 
+  /** Newest first; `before` pages further back in time. Matches title or URL. */
+  search(query: string, limit: number, before = Number.MAX_SAFE_INTEGER): HistoryItem[] {
+    const like = `%${query.replace(/[\\%_]/g, (c) => '\\' + c)}%`
+    return this.searchStmt.all(before, like, like, limit) as unknown as HistoryItem[]
+  }
+
+  delete(url: string): void {
+    this.deleteStmt.run(url)
+  }
+
   clear(): void {
     this.db.exec('DELETE FROM history')
   }
@@ -61,4 +81,14 @@ export class History {
   close(): void {
     this.db.close()
   }
+}
+
+let historyDb: History | undefined
+/** One history database for the app, opened on first use. */
+export const history = (): History => {
+  if (!historyDb) {
+    historyDb = new History(join(app.getPath('userData'), 'history.db'))
+    app.once('will-quit', () => historyDb?.close())
+  }
+  return historyDb
 }

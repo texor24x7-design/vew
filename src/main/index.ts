@@ -1,6 +1,11 @@
-import { app, BrowserWindow, session } from 'electron'
+import { app, BrowserWindow, nativeTheme, session } from 'electron'
+import { loadBlocker } from './adblock'
+import { registerInternalScheme, serveInternalPages } from './internal'
 import { MiniWindow } from './mini'
+import { settings } from './settings'
 import { VewWindow } from './window'
+
+registerInternalScheme()
 
 let main: VewWindow | null = null
 /** The browser window, created on demand (e.g. a link arrives while it's closed on macOS). */
@@ -46,10 +51,18 @@ if (!app.requestSingleInstanceLock()) {
     console.log(
       `Vew — Chromium ${process.versions.chrome}, Electron ${process.versions.electron}, ${process.platform}`
     )
-    // Deny everything until Phase 6 adds per-site prompts.
+    settings.load()
+    const applyAppearance = (): void => {
+      nativeTheme.themeSource = settings.get().appearance
+    }
+    applyAppearance()
+    settings.subscribe(applyAppearance)
+    // The default session only hosts Vew's own pages (websites use profile sessions): no permissions.
     session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) =>
       callback(false)
     )
+    serveInternalPages((url) => mainWindow().run({ type: 'open', input: url }))
+    void loadBlocker()
     mainWindow()
     // Launched to open a link (Windows passes it as an argument; macOS queued it above).
     for (const url of [...process.argv.slice(1).filter(isWebUrl), ...pending.splice(0)])

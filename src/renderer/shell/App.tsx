@@ -1,11 +1,12 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { Archive, ArrowLeft, ArrowRight, PanelLeft, RotateCw, X } from 'lucide-react'
-import { EMPTY_STATE, type BrowserState, type TabState } from '../../shared/ipc'
+import { EMPTY_STATE, type BrowserState, type SiteInfo, type TabState } from '../../shared/ipc'
 import { PAGE_INSET, SIDEBAR_DEFAULT_WIDTH } from '../../shared/layout'
 import { DEFAULT_THEME, palette } from '../../shared/theme'
 import { displayHost } from '../../shared/url'
 import { icon } from '../shared/ui'
+import { DownloadsButton, DownloadsList, SiteButton, SitePopover } from './Essentials'
 import { PageArea } from './PageArea'
 import { ArchiveList, Tabs, findNode } from './Sidebar'
 import { SpaceEditor, SpaceSwitcher, themeVars, useSpaceSwipe, useSystemDark } from './Spaces'
@@ -20,7 +21,8 @@ const spring = { type: 'spring', stiffness: 500, damping: 40 } as const
 export default function App(): React.JSX.Element {
   const [state, setState] = useState<BrowserState>(EMPTY_STATE)
   useEffect(() => window.vew.onState(setState), [])
-  const [showArchive, setShowArchive] = useState(false)
+  // What the sidebar body shows instead of the tabs, if anything.
+  const [panel, setPanel] = useState<'archive' | 'downloads' | null>(null)
   const systemDark = useSystemDark()
   const onWheel = useSpaceSwipe()
   const { sidebar } = state
@@ -34,7 +36,7 @@ export default function App(): React.JSX.Element {
     setSeenEditId(state.editSpaceId)
     if (state.editSpaceId !== null) {
       setEditingId(state.editSpaceId)
-      setShowArchive(false)
+      setPanel(null)
     }
   }
   const editing = editingId !== null && editingId === state.activeSpaceId
@@ -86,12 +88,14 @@ export default function App(): React.JSX.Element {
           }}
         >
           <NavRow active={active} />
-          <UrlPill active={active} collapsed={sidebar.collapsed} />
-          {showArchive ? (
+          <UrlPill active={active} collapsed={sidebar.collapsed} site={state.site} />
+          {panel === 'archive' ? (
             <>
               <h2 className="px-2 pt-1 text-[12px] font-medium text-(--muted)">Archive</h2>
               <ArchiveList items={state.archive} />
             </>
+          ) : panel === 'downloads' && state.downloads.length ? (
+            <DownloadsList downloads={state.downloads} />
           ) : editing && space ? (
             <SpaceEditor space={space} state={state} onDone={() => setEditingId(null)} />
           ) : (
@@ -118,21 +122,29 @@ export default function App(): React.JSX.Element {
           )}
           <Toast />
           <div className="flex h-10 shrink-0 items-center justify-between">
-            <button
-              className={`${iconButton} ${showArchive ? 'bg-(--fill)' : ''}`}
-              aria-label={showArchive ? 'Back to tabs' : 'Show archive'}
-              aria-pressed={showArchive}
-              title="Archive"
-              onClick={() => setShowArchive(!showArchive)}
-            >
-              <Archive {...icon} />
-            </button>
+            <div className="flex">
+              <button
+                className={`${iconButton} ${panel === 'archive' ? 'bg-(--fill)' : ''}`}
+                aria-label={panel === 'archive' ? 'Back to tabs' : 'Show archive'}
+                aria-pressed={panel === 'archive'}
+                title="Archive"
+                onClick={() => setPanel(panel === 'archive' ? null : 'archive')}
+              >
+                <Archive {...icon} />
+              </button>
+              <DownloadsButton
+                className={iconButton}
+                downloads={state.downloads}
+                open={panel === 'downloads'}
+                onToggle={() => setPanel(panel === 'downloads' ? null : 'downloads')}
+              />
+            </div>
             <SpaceSwitcher
               spaces={state.spaces}
               activeSpaceId={state.activeSpaceId}
               onEdit={(id) => {
                 if (id !== state.activeSpaceId) send({ type: 'switchSpace', id })
-                setShowArchive(false)
+                setPanel(null)
                 setEditingId(id)
               }}
             />
@@ -244,11 +256,14 @@ function NavRow({ active }: { active?: TabState }): React.JSX.Element {
 
 function UrlPill({
   active,
-  collapsed
+  collapsed,
+  site
 }: {
   active?: TabState
   collapsed: boolean
+  site: SiteInfo | null
 }): React.JSX.Element {
+  const [siteOpen, setSiteOpen] = useState(false)
   const input = useRef<HTMLInputElement>(null)
   // Mirrors `editing` synchronously: begin() calls focus(), whose handler runs before React re-renders.
   const editingNow = useRef(false)
@@ -273,25 +288,32 @@ function UrlPill({
   const beginFromEvent = useEffectEvent(begin)
   useEffect(() => window.vew.onFocusUrl(() => beginFromEvent()), [])
 
+  const showSite = site && !editing
   return (
-    <input
-      ref={input}
-      className="h-8 shrink-0 rounded-lg bg-(--fill) px-3 text-(--fg) outline-none placeholder:text-(--muted) focus:bg-white focus:text-neutral-900 focus:shadow-sm focus:ring-1 focus:ring-black/10 focus:placeholder:text-neutral-500 dark:focus:bg-neutral-800 dark:focus:text-neutral-100 dark:focus:ring-white/10 dark:focus:placeholder:text-neutral-400"
-      placeholder="Search or enter URL"
-      spellCheck={false}
-      aria-label="Address"
-      value={editing ? draft : active ? displayHost(active.url) : ''}
-      onChange={(e) => setDraft(e.target.value)}
-      onFocus={() => !editingNow.current && begin()}
-      onBlur={end}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' && draft.trim()) {
-          send({ type: active ? 'navigate' : 'open', input: draft })
-          end()
-        } else if (e.key === 'Escape') {
-          end()
-        }
-      }}
-    />
+    <div className="relative shrink-0">
+      {showSite && (
+        <SiteButton site={site} open={siteOpen} onToggle={() => setSiteOpen(!siteOpen)} />
+      )}
+      {showSite && siteOpen && <SitePopover site={site} onClose={() => setSiteOpen(false)} />}
+      <input
+        ref={input}
+        className={`h-8 w-full rounded-lg bg-(--fill) pr-3 ${showSite ? 'pl-8' : 'pl-3'} text-(--fg) outline-none placeholder:text-(--muted) focus:bg-white focus:text-neutral-900 focus:shadow-sm focus:ring-1 focus:ring-black/10 focus:placeholder:text-neutral-500 dark:focus:bg-neutral-800 dark:focus:text-neutral-100 dark:focus:ring-white/10 dark:focus:placeholder:text-neutral-400`}
+        placeholder="Search or enter URL"
+        spellCheck={false}
+        aria-label="Address"
+        value={editing ? draft : active ? displayHost(active.url) : ''}
+        onChange={(e) => setDraft(e.target.value)}
+        onFocus={() => !editingNow.current && begin()}
+        onBlur={end}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && draft.trim()) {
+            send({ type: active ? 'navigate' : 'open', input: draft })
+            end()
+          } else if (e.key === 'Escape') {
+            end()
+          }
+        }}
+      />
+    </div>
   )
 }
