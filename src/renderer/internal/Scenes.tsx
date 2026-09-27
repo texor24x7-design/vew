@@ -60,11 +60,11 @@ function Tile(props: { src: string; size: number; label?: string }): React.JSX.E
 
 /** Nature footage behind each step (see resources/onboarding/CREDITS.md). */
 export const CLIPS = [
-  { video: oceanVideo, poster: oceanPoster, credit: 'Nature video, HD – 4K · CC BY 3.0' },
-  { video: wavesVideo, poster: wavesPoster, credit: 'Mostafameraji · CC0' },
-  { video: forestVideo, poster: forestPoster, credit: 'Flykit production · CC BY 3.0' },
-  { video: waterfallVideo, poster: waterfallPoster, credit: 'US Forest Service · Public domain' },
-  { video: cloudsVideo, poster: cloudsPoster, credit: 'BLM Oregon & Washington · Public domain' }
+  { video: oceanVideo, poster: oceanPoster },
+  { video: wavesVideo, poster: wavesPoster },
+  { video: forestVideo, poster: forestPoster },
+  { video: waterfallVideo, poster: waterfallPoster },
+  { video: cloudsVideo, poster: cloudsPoster }
 ]
 export type Clip = (typeof CLIPS)[number]
 
@@ -112,7 +112,6 @@ export function Stage(props: {
       />
       <div className="absolute inset-0 bg-gradient-to-t from-black/35 via-transparent to-black/10" />
       <div className="relative grid h-full place-items-center p-8">{props.children}</div>
-      <p className="absolute bottom-3 left-4 text-[11px] text-white/80">{clip.credit}</p>
     </div>
   )
 }
