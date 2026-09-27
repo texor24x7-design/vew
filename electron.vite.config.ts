@@ -22,7 +22,8 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/preload/index.ts'),
-          overlay: resolve(__dirname, 'src/preload/overlay.ts')
+          overlay: resolve(__dirname, 'src/preload/overlay.ts'),
+          mini: resolve(__dirname, 'src/preload/mini.ts')
         }
       }
     }
@@ -33,7 +34,8 @@ export default defineConfig({
       rollupOptions: {
         input: {
           shell: resolve(__dirname, 'src/renderer/shell/index.html'),
-          overlay: resolve(__dirname, 'src/renderer/overlay/index.html')
+          overlay: resolve(__dirname, 'src/renderer/overlay/index.html'),
+          mini: resolve(__dirname, 'src/renderer/mini/index.html')
         }
       }
     },

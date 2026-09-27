@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC, type Command, type PaletteData } from '../shared/ipc'
+import { IPC, type Command, type PaletteData, type PeekInfo } from '../shared/ipc'
 
 const api = {
   send: (cmd: Command): void => ipcRenderer.send(IPC.command, cmd),
@@ -8,6 +8,11 @@ const api = {
     const listener = (_e: unknown, data: PaletteData): void => cb(data)
     ipcRenderer.on(IPC.paletteOpen, listener)
     return () => ipcRenderer.off(IPC.paletteOpen, listener)
+  },
+  onPeek: (cb: (info: PeekInfo | null) => void): (() => void) => {
+    const listener = (_e: unknown, info: PeekInfo | null): void => cb(info)
+    ipcRenderer.on(IPC.peek, listener)
+    return () => ipcRenderer.off(IPC.peek, listener)
   },
   onClose: (cb: () => void): (() => void) => {
     const listener = (): void => cb()

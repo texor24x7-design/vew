@@ -25,11 +25,24 @@ import {
   type NodeState,
   type PaletteData,
   type PaletteTab,
+  type PeekInfo,
+  type Snapshot,
   type Profile,
   type TabState,
   type Zone
 } from '../shared/ipc'
-import { PAGE_RADIUS, WIN_TITLEBAR_HEIGHT, clampSidebarWidth, pageBounds } from '../shared/layout'
+import {
+  MAX_SPLIT,
+  MIN_PANE,
+  PAGE_RADIUS,
+  WIN_TITLEBAR_HEIGHT,
+  clampSidebarWidth,
+  evenSizes,
+  pageBounds,
+  peekRect,
+  splitRects,
+  type Rect
+} from '../shared/layout'
 import { PRESETS } from '../shared/theme'
 import { toUrl, type SearchEngine } from '../shared/url'
 import { History } from './history'
@@ -45,11 +58,16 @@ import {
   type Location,
   type Node,
   type Space,
+  type Split,
   type Tab,
   type Zones
 } from './tree'
 
-const secureWebPreferences = { contextIsolation: true, sandbox: true, nodeIntegration: false }
+export const secureWebPreferences = {
+  contextIsolation: true,
+  sandbox: true,
+  nodeIntegration: false
+}
 const HOME_URL = 'https://www.google.com'
 // ponytail: fixed engine; the Phase 6 settings page will store the user's choice.
 const SEARCH_ENGINE: SearchEngine = 'google'
@@ -62,7 +80,7 @@ const SPACE_ICONS = ['🏠', '💼', '🌿', '🔥', '🌊', '🎨', '📚', '�
 
 let historyDb: History | undefined
 /** One history database for the app, opened on first use. */
-const history = (): History => {
+export const history = (): History => {
   if (!historyDb) {
     historyDb = new History(join(app.getPath('userData'), 'history.db'))
     app.once('will-quit', () => historyDb?.close())
@@ -88,7 +106,11 @@ async function suggest(query: string): Promise<string[]> {
 }
 
 /** Load one of the renderer pages (shell, overlay) from the dev server or the build. */
-function loadPage(wc: WebContents, page: 'shell' | 'overlay', query: Record<string, string>): void {
+export function loadPage(
+  wc: WebContents,
+  page: 'shell' | 'overlay' | 'mini',
+  query: Record<string, string>
+): void {
   if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
     wc.loadURL(
       `${process.env['ELECTRON_RENDERER_URL']}/${page}/index.html?${new URLSearchParams(query)}`
@@ -101,7 +123,7 @@ function loadPage(wc: WebContents, page: 'shell' | 'overlay', query: Record<stri
 let nextId = 1
 const newId = (): number => nextId++
 
-const load = (wc: WebContents, url: string): void => {
+export const load = (wc: WebContents, url: string): void => {
   wc.loadURL(url).catch((err: Error & { errno?: number }) => {
     // -3 ERR_ABORTED: superseded by another navigation, not a failure.
     if (err.errno !== -3) console.warn(`load ${url}: ${err.message}`)
@@ -109,7 +131,7 @@ const load = (wc: WebContents, url: string): void => {
 }
 
 /** Close a view's page. Once its WebContents is destroyed, `view.webContents` is gone despite the typings. */
-const closeView = (view: WebContentsView): void => {
+export const closeView = (view: WebContentsView): void => {
   const wc = view.webContents as WebContents | undefined
   if (wc && !wc.isDestroyed()) wc.close()
 }
@@ -124,6 +146,12 @@ export class VewWindow {
   /** Overlay view is attached (the bar is open or animating out). */
   private paletteOpen = false
   private paletteSeq = 0
+  /** Page views currently attached to the window (the active tab, or every pane of its split). */
+  private shown: WebContentsView[] = []
+  /** A sidebar tab is being dragged: page views are detached so the shell sees the pointer over the page. */
+  private dragging = false
+  /** Peek: a link from a pinned tab or favorite, floating over the page. */
+  private peek: { view: WebContentsView; from: Tab; info: Omit<PeekInfo, 'rect'> } | null = null
   private paletteFallback?: NodeJS.Timeout
   private readonly file = join(app.getPath('userData'), 'sidebar.json')
   private favorites: Node[]
@@ -259,6 +287,39 @@ export class VewWindow {
     return null
   }
 
+  /** Profile new pages should use: the active Space's. */
+  get profileId(): string {
+    return this.space.profileId
+  }
+
+  get spaceList(): { id: number; name: string; icon: string; profileId: string }[] {
+    return this.spaces.map(({ id, name, icon, profileId }) => ({ id, name, icon, profileId }))
+  }
+
+  /**
+   * Take a page from elsewhere (the mini window) into a Space as its active Today tab. The live page is kept
+   * when it already runs in that Space's profile; otherwise it reopens there, so it gets the right cookies.
+   */
+  adoptPage(
+    view: WebContentsView,
+    info: { url: string; title: string; favicon?: string },
+    spaceId: number,
+    profileId: string
+  ): void {
+    this.switchSpace(spaceId)
+    const sameProfile = profileId === this.space.profileId
+    if (!sameProfile) closeView(view)
+    const tab = this.openTab(info.url, {
+      activate: false,
+      webContents: sameProfile ? view : undefined,
+      title: info.title,
+      favicon: info.favicon
+    })
+    this.activate(tab.id)
+    if (this.win.isMinimized()) this.win.restore()
+    this.win.focus()
+  }
+
   run(cmd: Command): void {
     const active = this.active()
     const wc = active?.view?.webContents
@@ -384,6 +445,31 @@ export class VewWindow {
       }
       case 'clearHistory':
         return void this.clearHistory()
+      case 'splitWith':
+        return this.splitWith(cmd.id, cmd.edge, cmd.targetId)
+      case 'resizeSplit': {
+        const split = active && this.splitOf(active.id)
+        const sum = cmd.sizes.reduce((a, b) => a + b, 0)
+        if (!split || cmd.sizes.length !== split.sizes.length || Math.abs(sum - 1) > 0.01) return
+        if (cmd.sizes.some((v) => v < MIN_PANE - 0.001)) return
+        split.sizes = cmd.sizes
+        this.layout()
+        return this.push()
+      }
+      case 'unsplit': {
+        const split = this.splitOf(cmd.id)
+        if (!split) return
+        if (cmd.all) this.space.splits.splice(this.space.splits.indexOf(split), 1)
+        else this.removeFromSplit(cmd.id)
+        this.present()
+        return this.push()
+      }
+      case 'dragging':
+        return void this.setDragging(cmd.on)
+      case 'peekExpand':
+        return this.expandPeek()
+      case 'peekClose':
+        return this.closePeek()
       case 'back':
         if (wc?.navigationHistory.canGoBack()) wc.navigationHistory.goBack()
         return
@@ -413,7 +499,7 @@ export class VewWindow {
     opts: {
       activate: boolean
       opener?: Tab
-      webContents?: WebContents
+      webContents?: WebContents | WebContentsView
       title?: string
       favicon?: string
     }
@@ -437,12 +523,16 @@ export class VewWindow {
     return tab
   }
 
-  private createView(tab: Tab, webContents?: WebContents): WebContentsView {
-    const view = new WebContentsView(
-      webContents
-        ? { webContents }
-        : { webPreferences: { ...secureWebPreferences, session: sessionFor(tab.profileId) } }
-    )
+  /** Give a tab its page view: a new one, one adopting a popup's WebContents, or an existing view (Peek). */
+  private createView(tab: Tab, source?: WebContents | WebContentsView): WebContentsView {
+    const view =
+      source instanceof WebContentsView
+        ? source
+        : new WebContentsView(
+            source
+              ? { webContents: source }
+              : { webPreferences: { ...secureWebPreferences, session: sessionFor(tab.profileId) } }
+          )
     view.setBorderRadius(PAGE_RADIUS)
     view.setBackgroundColor('#ffffff')
     tab.view = view
@@ -469,10 +559,36 @@ export class VewWindow {
       history().visit(url, tab.title)
     })
     wc.on('before-input-event', (e, input) => this.onInput(e, input))
+    // Clicking into a split pane makes it the active tab (the URL pill and shortcuts follow it).
+    wc.on('before-mouse-event', (_e, mouse) => {
+      if (mouse.type !== 'mouseDown' || tab.id === this.activeId || !this.shown.includes(view))
+        return
+      this.activeId = tab.id
+      tab.lastActive = Date.now()
+      this.push()
+    })
     // The page closed itself (e.g. an OAuth popup calling window.close()). Views we unload ourselves are detached first.
     wc.on('destroyed', () => tab.view === view && this.closeTab(tab.id))
     // window.open and target=_blank become Vew tabs. Adopting Chromium's WebContents keeps window.opener working.
-    wc.setWindowOpenHandler((details) => ({
+    wc.setWindowOpenHandler((details) => {
+      // Links from pinned tabs and favorites that would open a new tab Peek instead, like Arc.
+      // Popups (window.open with features, e.g. sign-in) stay real tabs so window.opener keeps working.
+      const zone = this.find(tab.id)?.loc.zone
+      if (details.disposition === 'foreground-tab' && (zone === 'pinned' || zone === 'favorites')) {
+        this.openPeek(details.url, tab)
+        return { action: 'deny' }
+      }
+      return this.allowAsTab(tab, details)
+    })
+    return view
+  }
+
+  /** window.open / target=_blank → a Vew tab that adopts Chromium's WebContents (keeps window.opener). */
+  private allowAsTab(
+    tab: Tab,
+    details: Electron.HandlerDetails
+  ): Electron.WindowOpenHandlerResponse {
+    return {
       action: 'allow',
       createWindow: (options) => {
         // Electron passes the new guest WebContents here, but it is missing from the typings.
@@ -486,8 +602,7 @@ export class VewWindow {
         if (!guest) load(childWc, details.url)
         return childWc
       }
-    }))
-    return view
+    }
   }
 
   private activate(id: number): void {
@@ -496,20 +611,114 @@ export class VewWindow {
     const prev = this.active()
     const now = Date.now()
     if (prev) prev.lastActive = now
-    if (prev?.view && prev !== node) this.win.contentView.removeChildView(prev.view)
     this.activeId = id
     node.lastActive = now
-    let view = node.view
-    if (!view) {
-      view = this.createView(node)
-      load(view.webContents, node.url)
-    }
-    this.win.contentView.addChildView(view)
-    // Adding a view puts it on top; keep the command bar above it while it animates out.
-    if (this.paletteOpen) this.win.contentView.addChildView(this.overlay)
-    else view.webContents.focus()
-    this.layout()
+    this.present()
+    if (!this.paletteOpen && !this.peek) node.view?.webContents.focus()
     this.push()
+  }
+
+  private tabById(id: number): Tab | undefined {
+    const node = this.find(id)?.loc.node
+    return node?.kind === 'tab' ? node : undefined
+  }
+
+  /** The split in the active Space that contains this tab. */
+  private splitOf(id: number): Split | undefined {
+    return this.space.splits.find((s) => s.tabIds.includes(id))
+  }
+
+  /** Take a tab out of its split; a split left with one tab dissolves. */
+  private removeFromSplit(id: number, space = this.space): void {
+    const split = space.splits.find((s) => s.tabIds.includes(id))
+    if (!split) return
+    split.tabIds.splice(split.tabIds.indexOf(id), 1)
+    split.sizes = evenSizes(split.tabIds.length)
+    if (split.tabIds.length < 2) space.splits.splice(space.splits.indexOf(split), 1)
+  }
+
+  /** Put `id` next to `targetId` (default: the active tab), creating the split if needed. */
+  private splitWith(
+    id: number,
+    edge: 'left' | 'right' | 'top' | 'bottom',
+    targetId?: number
+  ): void {
+    const active = this.active()
+    const other = locate(this.zones, id)?.node
+    if (!active || other?.kind !== 'tab' || other === active) return
+    let split = this.splitOf(active.id)
+    const target = targetId !== undefined && split?.tabIds.includes(targetId) ? targetId : active.id
+    if (target === id) return
+    if (split?.tabIds.includes(id)) {
+      split.tabIds.splice(split.tabIds.indexOf(id), 1) // reorder within the same split
+    } else {
+      this.removeFromSplit(id)
+      if (split && split.tabIds.length >= MAX_SPLIT)
+        return this.toast('Split view holds up to 4 tabs')
+    }
+    const direction = edge === 'left' || edge === 'right' ? 'row' : 'column'
+    if (!split) {
+      split = { id: newId(), tabIds: [active.id], direction, sizes: [1] }
+      this.space.splits.push(split)
+    }
+    const i = split.tabIds.indexOf(target)
+    split.tabIds.splice(edge === 'left' || edge === 'top' ? i : i + 1, 0, id)
+    split.sizes = evenSizes(split.tabIds.length)
+    this.activate(id)
+  }
+
+  /** Tabs whose pages belong on screen: the active tab's split panes, or just the active tab. */
+  private visibleTabs(): Tab[] {
+    const active = this.active()
+    if (!active) return []
+    const split = this.splitOf(active.id)
+    return split
+      ? split.tabIds.map((id) => this.tabById(id)).filter((t) => t !== undefined)
+      : [active]
+  }
+
+  /**
+   * Attach exactly the views that should be visible, stacked page < overlay < Peek, then lay out.
+   * Every change to what's on screen goes through here.
+   */
+  private present(): void {
+    if (this.disposed) return
+    const views = this.dragging ? [] : this.visibleTabs().map((t) => this.ensureView(t))
+    for (const v of this.shown) if (!views.includes(v)) this.win.contentView.removeChildView(v)
+    for (const v of views) this.win.contentView.addChildView(v)
+    if (this.paletteOpen || this.peek) this.win.contentView.addChildView(this.overlay)
+    else this.win.contentView.removeChildView(this.overlay)
+    if (this.peek) this.win.contentView.addChildView(this.peek.view)
+    this.shown = views
+    this.layout()
+  }
+
+  private ensureView(tab: Tab): WebContentsView {
+    if (tab.view) return tab.view
+    const view = this.createView(tab)
+    load(view.webContents, tab.url)
+    return view
+  }
+
+  /** While a tab is dragged from the sidebar, show pictures of the panes so the shell gets the pointer. */
+  private async setDragging(on: boolean): Promise<void> {
+    if (on === this.dragging) return
+    if (!on) {
+      this.dragging = false
+      this.win.webContents.send(IPC.snapshot, [])
+      return this.present()
+    }
+    const panes = this.shown.map((v) => ({ view: v, rect: v.getBounds() }))
+    const snaps: Snapshot[] = await Promise.all(
+      panes.map(async ({ view, rect }) => ({
+        ...rect,
+        src: (await view.webContents.capturePage()).toDataURL()
+      }))
+    )
+    if (this.disposed) return
+    this.win.webContents.send(IPC.snapshot, snaps)
+    this.dragging = true
+    this.present()
   }
 
   /** Drop a tab's page but keep its sidebar entry (URL, title, favicon). */
@@ -519,6 +728,7 @@ export class VewWindow {
     tab.view = null
     tab.loading = false
     this.win.contentView.removeChildView(view)
+    this.shown = this.shown.filter((v) => v !== view)
     closeView(view)
   }
 
@@ -535,14 +745,20 @@ export class VewWindow {
       if (this.closedUrls.length > REOPEN_LIMIT) this.closedUrls.shift()
     }
     tab.lastActive = Date.now()
+    const split = space.splits.find((s) => s.tabIds.includes(tab.id))
+    const sibling = split?.tabIds.find((t) => t !== tab.id)
+    this.removeFromSplit(tab.id, space)
     this.unload(tab)
     // A background Space just forgets a removed tab; it has nothing on screen to replace.
     if (space !== this.space) {
       if (loc.zone === 'today' && space.activeId === id) space.activeId = null
       return this.push()
     }
+    if (this.activeId !== id) this.present()
     if (this.activeId === id) {
       this.activeId = null
+      // Closing a split pane keeps the rest of the split on screen.
+      if (sibling !== undefined) return this.activate(sibling)
       // Fall back to the most recently used tab that is still loaded.
       const next = tabsInOrder(this.zones)
         .filter((t) => t.view)
@@ -582,11 +798,12 @@ export class VewWindow {
     if (!target || target === this.space) return
     const prev = this.active()
     if (prev) prev.lastActive = Date.now()
-    if (prev?.view) this.win.contentView.removeChildView(prev.view)
+    this.closePeek()
     this.activeSpaceId = id
     if (this.activeId !== null && this.find(this.activeId)) this.activate(this.activeId)
     else {
       this.activeId = null
+      this.present()
       this.push()
     }
   }
@@ -601,7 +818,8 @@ export class VewWindow {
       profileId: this.space.profileId,
       pinned: [],
       today: [],
-      activeId: null
+      activeId: null,
+      splits: []
     }
     this.spaces.push(space)
     this.switchSpace(space.id)
@@ -742,6 +960,18 @@ export class VewWindow {
       )
       if (zone === 'pinned') items.push({ label: 'New Folder', click: () => this.newFolder(null) })
       items.push({ type: 'separator' })
+      const active = this.active()
+      const split = this.splitOf(id)
+      if (active && id !== active.id && !split?.tabIds.includes(active.id)) {
+        items.push({ label: 'Open in Split View', click: () => this.splitWith(id, 'right') })
+      }
+      if (split) {
+        items.push(
+          { label: 'Remove from Split View', click: () => this.run({ type: 'unsplit', id }) },
+          { label: 'Close Split View', click: () => this.run({ type: 'unsplit', id, all: true }) }
+        )
+      }
+      items.push({ type: 'separator' })
       if (zone === 'today') items.push({ label: 'Close Tab', click: () => this.closeTab(id) })
       else if (node.view) items.push({ label: 'Unload Tab', click: () => this.closeTab(id) })
     }
@@ -795,9 +1025,9 @@ export class VewWindow {
       activeSpaceId: this.activeSpaceId,
       searchEngine: 'Google'
     }
+    this.closePeek()
     this.paletteOpen = true
-    this.layout()
-    this.win.contentView.addChildView(this.overlay) // on top of everything
+    this.present()
     const wc = this.overlay.webContents
     wc.focus()
     if (wc.isLoading()) wc.once('did-finish-load', () => wc.send(IPC.paletteOpen, data))
@@ -817,8 +1047,89 @@ export class VewWindow {
     clearTimeout(this.paletteFallback)
     if (!this.paletteOpen || this.disposed) return
     this.paletteOpen = false
-    this.win.contentView.removeChildView(this.overlay)
+    this.present()
     this.active()?.view?.webContents.focus()
+  }
+
+  private openPeek(url: string, from: Tab): void {
+    this.closePeek()
+    const view = new WebContentsView({
+      webPreferences: { ...secureWebPreferences, session: sessionFor(from.profileId) }
+    })
+    view.setBorderRadius(PAGE_RADIUS)
+    view.setBackgroundColor('#ffffff')
+    const wc = view.webContents
+    const peek = { view, from, info: { url, title: url, favicon: undefined as string | undefined } }
+    const update = (patch: Partial<typeof peek.info>): void => {
+      if (this.peek?.view !== view) return // expanded into a tab or closed
+      Object.assign(peek.info, patch)
+      this.sendPeek()
+    }
+    wc.on('page-title-updated', (_e, title) => update({ title }))
+    wc.on('page-favicon-updated', (_e, favicons) => update({ favicon: favicons[0] }))
+    wc.on('did-navigate', (_e, u) => {
+      if (this.peek?.view !== view) return // now a tab, which records its own history
+      update({ url: u })
+      history().visit(u)
+    })
+    wc.on('before-input-event', (e, input) => {
+      if (this.peek?.view !== view) return
+      if (input.type === 'keyDown' && input.key === 'Escape') {
+        e.preventDefault()
+        return this.closePeek()
+      }
+      this.onInput(e, input)
+    })
+    // Links in Peek that want a new tab get one.
+    wc.setWindowOpenHandler((details) => {
+      this.openTab(details.url, { activate: true, opener: from })
+      return { action: 'deny' }
+    })
+    load(wc, url)
+    this.peek = peek
+    this.present()
+    this.sendPeek()
+    wc.focus()
+  }
+
+  private sendPeek(): void {
+    if (!this.peek) return this.overlay.webContents.send(IPC.peek, null)
+    const [width, height] = this.win.getContentSize()
+    const info: PeekInfo = {
+      ...this.peek.info,
+      rect: peekRect(pageBounds(width, height, process.platform, this.sidebar))
+    }
+    const wc = this.overlay.webContents
+    if (wc.isLoading()) wc.once('did-finish-load', () => wc.send(IPC.peek, info))
+    else wc.send(IPC.peek, info)
+  }
+
+  private closePeek(): void {
+    if (!this.peek) return
+    const { view } = this.peek
+    this.peek = null
+    this.win.contentView.removeChildView(view)
+    closeView(view)
+    this.sendPeek()
+    this.present()
+    this.active()?.view?.webContents.focus()
+  }
+
+  /** Turn the Peek into a real tab, keeping the page as it is (same WebContents, no reload). */
+  private expandPeek(): void {
+    if (!this.peek) return
+    const { view, from, info } = this.peek
+    this.peek = null
+    this.win.contentView.removeChildView(view)
+    this.sendPeek()
+    const tab = this.openTab(info.url, {
+      activate: false,
+      opener: from,
+      webContents: view,
+      title: info.title,
+      favicon: info.favicon
+    })
+    this.activate(tab.id)
   }
 
   private async clearHistory(): Promise<void> {
@@ -839,28 +1150,37 @@ export class VewWindow {
     if (isMac) this.win.setWindowButtonVisibility(!this.sidebar.collapsed || this.sidebar.peek)
   }
 
-  /** Place the active page card; `animate` eases it over the sidebar animation's duration. */
+  /** Place the page card (or split panes) and Peek; `animate` eases panes over the sidebar animation. */
   private layout(animate = false): void {
     clearInterval(this.tween)
     const [width, height] = this.win.getContentSize()
-    if (this.paletteOpen) this.overlay.setBounds({ x: 0, y: 0, width, height })
-    const view = this.active()?.view
-    if (!view) return
-    const to = pageBounds(width, height, process.platform, this.sidebar)
-    if (!animate) return view.setBounds(to)
-    const from = view.getBounds()
+    this.overlay.setBounds({ x: 0, y: 0, width, height })
+    const card = pageBounds(width, height, process.platform, this.sidebar)
+    if (this.peek) {
+      this.peek.view.setBounds(peekRect(card))
+      this.sendPeek()
+    }
+    const active = this.active()
+    const split = active && this.splitOf(active.id)
+    const rects: Rect[] = split ? splitRects(card, split.direction, split.sizes) : [card]
+    const targets = this.shown.map((view, i) => ({ view, to: rects[i] ?? card }))
+    if (!animate) return targets.forEach(({ view, to }) => view.setBounds(to))
+    const froms = targets.map(({ view }) => view.getBounds())
     const start = Date.now()
     const lerp = (a: number, b: number, t: number): number => Math.round(a + (b - a) * t)
     this.tween = setInterval(() => {
       const p = Math.min(1, (Date.now() - start) / SIDEBAR_ANIM_MS)
       const t = 1 - (1 - p) ** 3 // ease-out cubic
-      const r: Rectangle = {
-        x: lerp(from.x, to.x, t),
-        y: lerp(from.y, to.y, t),
-        width: lerp(from.width, to.width, t),
-        height: lerp(from.height, to.height, t)
-      }
-      view.setBounds(r)
+      targets.forEach(({ view, to }, i) => {
+        const from = froms[i]
+        const r: Rectangle = {
+          x: lerp(from.x, to.x, t),
+          y: lerp(from.y, to.y, t),
+          width: lerp(from.width, to.width, t),
+          height: lerp(from.height, to.height, t)
+        }
+        view.setBounds(r)
+      })
       if (p === 1) clearInterval(this.tween)
     }, 16)
   }
@@ -876,7 +1196,8 @@ export class VewWindow {
       loaded: t.view !== null,
       loading: t.loading,
       canGoBack: history?.canGoBack() ?? false,
-      canGoForward: history?.canGoForward() ?? false
+      canGoForward: history?.canGoForward() ?? false,
+      inSplit: this.space.splits.some((s) => s.tabIds.includes(t.id))
     }
   }
 
@@ -903,7 +1224,11 @@ export class VewWindow {
       })),
       activeSpaceId: this.activeSpaceId,
       profiles: this.profiles,
-      editSpaceId: this.editSpaceId
+      editSpaceId: this.editSpaceId,
+      split: (() => {
+        const split = this.activeId === null ? undefined : this.splitOf(this.activeId)
+        return split ? { ...split, tabIds: [...split.tabIds], sizes: [...split.sizes] } : null
+      })()
     }
     this.win.webContents.send(IPC.state, state)
     clearTimeout(this.saveTimer)

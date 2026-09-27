@@ -1,0 +1,21 @@
+@import 'tailwindcss';
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  font:
+    13px -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI Variable',
+    'Segoe UI',
+    system-ui,
+    sans-serif;
+  user-select: none;
+  -webkit-app-region: drag;
+}
+button {
+  -webkit-app-region: no-drag;
+}

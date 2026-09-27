@@ -1,8 +1,14 @@
 import { copyFileSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import type { ArchivedTab, Profile } from '../shared/ipc'
-import { SIDEBAR_DEFAULT_WIDTH, clampSidebarWidth } from '../shared/layout'
+import {
+  MAX_SPLIT,
+  SIDEBAR_DEFAULT_WIDTH,
+  clampSidebarWidth,
+  evenSizes,
+  type SplitDirection
+} from '../shared/layout'
 import { DEFAULT_THEME, isTheme, type Theme } from '../shared/theme'
-import type { Node, Space } from './tree'
+import type { Node, Space, Split } from './tree'
 
 interface SavedTab {
   kind: 'tab'
@@ -22,6 +28,13 @@ interface SavedFolder {
 }
 type SavedNode = SavedTab | SavedFolder
 
+/** A split refers to its tabs by their position in save order (tab ids aren't stable across launches). */
+interface SavedSplit {
+  tabs: number[]
+  direction: SplitDirection
+  sizes: number[]
+}
+
 interface SavedSpace {
   name: string
   icon: string
@@ -29,6 +42,7 @@ interface SavedSpace {
   profileId: string
   pinned: SavedNode[]
   today: SavedNode[]
+  splits: SavedSplit[]
 }
 
 export interface Saved {
@@ -52,6 +66,7 @@ export const newSavedSpace = (overrides: Partial<SavedSpace> = {}): SavedSpace =
   profileId: DEFAULT_PROFILE.id,
   pinned: [],
   today: [],
+  splits: [],
   ...overrides
 })
 
@@ -102,6 +117,26 @@ const nodes = (v: unknown): SavedNode[] =>
     .filter((n) => n !== null)
 const tabsOnly = (v: unknown): SavedNode[] => nodes(v).filter((n) => n.kind === 'tab')
 
+const validSizes = (v: unknown, n: number): v is number[] =>
+  Array.isArray(v) &&
+  v.length === n &&
+  v.every((x) => typeof x === 'number' && x > 0 && x < 1) &&
+  Math.abs(v.reduce((a: number, b: number) => a + b, 0) - 1) < 0.01
+
+function splits(v: unknown): SavedSplit[] {
+  return arr(v)
+    .filter(isObj)
+    .map((sp) => {
+      const tabs = arr(sp.tabs).filter(Number.isInteger) as number[]
+      return {
+        tabs,
+        direction: (sp.direction === 'column' ? 'column' : 'row') as SplitDirection,
+        sizes: validSizes(sp.sizes, tabs.length) ? sp.sizes : evenSizes(tabs.length)
+      }
+    })
+    .filter((sp) => sp.tabs.length >= 2 && sp.tabs.length <= MAX_SPLIT)
+}
+
 /** Parse the saved file defensively; anything malformed is dropped rather than trusted. */
 export function sanitize(v: unknown): Saved {
   const s = emptySaved()
@@ -122,7 +157,8 @@ export function sanitize(v: unknown): Saved {
         theme: isTheme(sp.theme) ? sp.theme : DEFAULT_THEME,
         profileId: profileIds.has(sp.profileId as string) ? (sp.profileId as string) : 'default',
         pinned: nodes(sp.pinned),
-        today: tabsOnly(sp.today)
+        today: tabsOnly(sp.today),
+        splits: splits(sp.splits)
       })
     )
   } else if (isObj(v.zones)) {
@@ -174,11 +210,14 @@ type Live = { favorites: Node[]; spaces: Space[]; activeSpaceId: number }
 
 /** Live model → saved shape (everything except profiles/archive/sidebar settings). */
 export function fromLive(live: Live): Pick<Saved, 'favorites' | 'spaces' | 'activeSpace'> {
+  // Same traversal order as toLive, so ordinals line up on load.
+  const ordinal = new Map<number, number>()
   const conv = (n: Node): SavedNode => {
     if (n.kind === 'folder') {
       return { kind: 'folder', name: n.name, open: n.open, children: n.children.map(conv) }
     }
     const activeIn = live.spaces.flatMap((sp, i) => (sp.activeId === n.id ? [i] : []))
+    ordinal.set(n.id, ordinal.size)
     return {
       kind: 'tab',
       url: n.url,
@@ -189,16 +228,29 @@ export function fromLive(live: Live): Pick<Saved, 'favorites' | 'spaces' | 'acti
       ...(activeIn.length && { activeIn })
     }
   }
+  const favorites = live.favorites.map(conv)
+  const spaces = live.spaces.map((sp) => ({
+    name: sp.name,
+    icon: sp.icon,
+    theme: sp.theme,
+    profileId: sp.profileId,
+    pinned: sp.pinned.map(conv),
+    today: sp.today.map(conv),
+    splits: [] as SavedSplit[]
+  }))
+  // Every tab has an ordinal now; splits can refer to them.
+  live.spaces.forEach((sp, i) => {
+    spaces[i].splits = sp.splits
+      .map((split) => ({
+        tabs: split.tabIds.map((id) => ordinal.get(id)).filter((o) => o !== undefined),
+        direction: split.direction,
+        sizes: split.sizes
+      }))
+      .filter((split) => split.tabs.length === split.sizes.length && split.tabs.length >= 2)
+  })
   return {
-    favorites: live.favorites.map(conv),
-    spaces: live.spaces.map((sp) => ({
-      name: sp.name,
-      icon: sp.icon,
-      theme: sp.theme,
-      profileId: sp.profileId,
-      pinned: sp.pinned.map(conv),
-      today: sp.today.map(conv)
-    })),
+    favorites,
+    spaces,
     activeSpace: Math.max(
       0,
       live.spaces.findIndex((sp) => sp.id === live.activeSpaceId)
@@ -216,8 +268,10 @@ export function toLive(saved: Saved, newId: () => number): Live {
     profileId: sp.profileId,
     pinned: [],
     today: [],
-    activeId: null
+    activeId: null,
+    splits: []
   }))
+  const byOrdinal: number[] = []
   const conv =
     (fallbackProfile: string) =>
     (n: SavedNode): Node => {
@@ -232,6 +286,7 @@ export function toLive(saved: Saved, newId: () => number): Live {
         }
       }
       for (const i of n.activeIn ?? []) if (spaces[i]) spaces[i].activeId = id
+      byOrdinal.push(id)
       const { url, title, favicon, lastActive } = n
       const profileId =
         n.profileId && saved.profiles.some((p) => p.id === n.profileId)
@@ -253,6 +308,21 @@ export function toLive(saved: Saved, newId: () => number): Live {
   saved.spaces.forEach((sp, i) => {
     spaces[i].pinned = sp.pinned.map(conv(sp.profileId))
     spaces[i].today = sp.today.map(conv(sp.profileId))
+  })
+  // Rebuild splits from ordinals; skip any that point at missing or already-split tabs.
+  saved.spaces.forEach((sp, i) => {
+    const used = new Set<number>()
+    for (const saved of sp.splits) {
+      const tabIds = saved.tabs.map((o) => byOrdinal[o])
+      if (
+        tabIds.some((id) => id === undefined || used.has(id)) ||
+        new Set(tabIds).size !== tabIds.length
+      )
+        continue
+      tabIds.forEach((id) => used.add(id))
+      const split: Split = { id: newId(), tabIds, direction: saved.direction, sizes: saved.sizes }
+      spaces[i].splits.push(split)
+    }
   })
   return { favorites, spaces, activeSpaceId: spaces[saved.activeSpace].id }
 }

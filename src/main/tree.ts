@@ -1,5 +1,6 @@
 import type { WebContentsView } from 'electron'
 import type { Where, Zone } from '../shared/ipc'
+import type { SplitDirection } from '../shared/layout'
 import type { Theme } from '../shared/theme'
 
 export interface Tab {
@@ -38,6 +39,16 @@ export interface Space {
   today: Node[]
   /** The tab this Space shows; each Space remembers its own. */
   activeId: number | null
+  /** Groups of 2–4 tabs shown side by side; a tab is in at most one. */
+  splits: Split[]
+}
+
+export interface Split {
+  id: number
+  tabIds: number[]
+  direction: SplitDirection
+  /** Fractions of the split's length, one per pane, summing to 1. */
+  sizes: number[]
 }
 
 /** A Space's view of the sidebar: shared favorites plus its own pinned and today lists (same arrays, not copies). */

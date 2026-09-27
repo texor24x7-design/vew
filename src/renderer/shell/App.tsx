@@ -2,10 +2,11 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { Archive, ArrowLeft, ArrowRight, PanelLeft, RotateCw, X } from 'lucide-react'
 import { EMPTY_STATE, type BrowserState, type TabState } from '../../shared/ipc'
-import { PAGE_INSET, PAGE_RADIUS, SIDEBAR_DEFAULT_WIDTH, pageTop } from '../../shared/layout'
+import { PAGE_INSET, SIDEBAR_DEFAULT_WIDTH } from '../../shared/layout'
 import { DEFAULT_THEME, palette } from '../../shared/theme'
 import { displayHost } from '../../shared/url'
 import { icon } from '../shared/ui'
+import { PageArea } from './PageArea'
 import { ArchiveList, Tabs, findNode } from './Sidebar'
 import { SpaceEditor, SpaceSwitcher, themeVars, useSpaceSwipe, useSystemDark } from './Spaces'
 
@@ -54,9 +55,6 @@ export default function App(): React.JSX.Element {
       : findNode([...state.favorites, ...state.pinned, ...state.today], state.activeId)
   const active = found?.kind === 'tab' ? found : undefined
   const hidden = sidebar.collapsed && !sidebar.peek
-  // Mirrors pageBounds() in main so the shadow sits exactly under the native page card.
-  const left = sidebar.collapsed ? 0 : sidebar.width
-  const cardX = (sidebar.collapsed && sidebar.peek ? sidebar.width : left) + PAGE_INSET
 
   return (
     <MotionConfig reducedMotion="user" transition={spring}>
@@ -73,19 +71,7 @@ export default function App(): React.JSX.Element {
             transition={{ duration: 0.25 }}
           />
         </AnimatePresence>
-        {/* Soft shadow under the native page card, which Chromium paints on top of this. */}
-        <div
-          className="absolute grid place-items-center bg-white text-neutral-500 shadow-[0_1px_3px_rgba(0,0,0,0.12),0_8px_24px_rgba(0,0,0,0.08)] dark:bg-neutral-900 dark:text-neutral-400"
-          style={{
-            left: cardX,
-            top: pageTop(platform),
-            width: `calc(100% - ${left + 2 * PAGE_INSET}px)`,
-            bottom: PAGE_INSET,
-            borderRadius: PAGE_RADIUS
-          }}
-        >
-          {!active && `Press ${MOD}T to open a tab`}
-        </div>
+        <PageArea state={state} />
         <motion.aside
           initial={false}
           animate={{ x: hidden ? -(sidebar.width + PAGE_INSET) : 0 }}

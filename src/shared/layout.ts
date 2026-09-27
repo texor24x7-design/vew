@@ -42,3 +42,68 @@ export function pageBounds(
     height: Math.max(0, height - y - PAGE_INSET)
   }
 }
+
+export type SplitDirection = 'row' | 'column'
+export const MAX_SPLIT = 4
+/** No pane may shrink below this fraction of the split. */
+export const MIN_PANE = 0.15
+
+/** Pane rects inside the page card, separated by the same gap as the card inset. */
+export function splitRects(card: Rect, direction: SplitDirection, sizes: number[]): Rect[] {
+  const gap = PAGE_INSET
+  const horizontal = direction === 'row'
+  const total = (horizontal ? card.width : card.height) - gap * (sizes.length - 1)
+  const rects: Rect[] = []
+  let offset = horizontal ? card.x : card.y
+  sizes.forEach((size, i) => {
+    const last = i === sizes.length - 1
+    const end = horizontal ? card.x + card.width : card.y + card.height
+    const length = last ? end - offset : Math.round(total * size)
+    rects.push(
+      horizontal
+        ? { x: offset, y: card.y, width: Math.max(0, length), height: card.height }
+        : { x: card.x, y: offset, width: card.width, height: Math.max(0, length) }
+    )
+    offset += length + gap
+  })
+  return rects
+}
+
+/**
+ * New sizes after dragging the divider after pane `index` to `position` (px along the split axis).
+ * Only the two neighbouring panes change, and neither goes below MIN_PANE.
+ */
+export function resizeSplit(
+  card: Rect,
+  direction: SplitDirection,
+  sizes: number[],
+  index: number,
+  position: number
+): number[] {
+  const rects = splitRects(card, direction, sizes)
+  const horizontal = direction === 'row'
+  const total = (horizontal ? card.width : card.height) - PAGE_INSET * (sizes.length - 1)
+  const start = horizontal ? rects[index].x : rects[index].y
+  const pair = sizes[index] + sizes[index + 1]
+  const wanted = (position - start - PAGE_INSET / 2) / total
+  const a = Math.min(pair - MIN_PANE, Math.max(MIN_PANE, wanted))
+  const next = [...sizes]
+  next[index] = a
+  next[index + 1] = pair - a
+  return next
+}
+
+export const evenSizes = (n: number): number[] => Array.from({ length: n }, () => 1 / n)
+
+/** The Peek card: a floating page centered over the page card, leaving room above for its toolbar. */
+export const PEEK_TOOLBAR = 40
+export function peekRect(card: Rect): Rect {
+  const width = Math.round(Math.min(card.width - 48, Math.max(card.width * 0.8, 480)))
+  const height = Math.round(card.height * 0.86) - PEEK_TOOLBAR
+  return {
+    x: Math.round(card.x + (card.width - width) / 2),
+    y: Math.round(card.y + (card.height - height - PEEK_TOOLBAR) / 2) + PEEK_TOOLBAR,
+    width,
+    height
+  }
+}

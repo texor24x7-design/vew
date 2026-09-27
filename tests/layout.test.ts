@@ -45,3 +45,38 @@ test('sidebar width is clamped to 180–360', () => {
   expect(clampSidebarWidth(1000)).toBe(360)
   expect(clampSidebarWidth(250.4)).toBe(250)
 })
+
+import { MIN_PANE, evenSizes, peekRect, resizeSplit, splitRects } from '../src/shared/layout'
+
+const card = { x: 248, y: 8, width: 1024, height: 720 }
+
+test('split panes tile the card exactly, with one inset gap between them', () => {
+  for (const dir of ['row', 'column'] as const) {
+    for (const n of [2, 3, 4]) {
+      const rects = splitRects(card, dir, evenSizes(n))
+      const [pos, len] = dir === 'row' ? (['x', 'width'] as const) : (['y', 'height'] as const)
+      expect(rects[0][pos]).toBe(card[pos])
+      expect(rects.at(-1)![pos] + rects.at(-1)![len]).toBe(card[pos] + card[len])
+      for (let i = 1; i < n; i++)
+        expect(rects[i][pos] - (rects[i - 1][pos] + rects[i - 1][len])).toBe(PAGE_INSET)
+    }
+  }
+})
+
+test('dragging a divider moves only its two panes and respects the minimum', () => {
+  const sizes = evenSizes(3)
+  const moved = resizeSplit(card, 'row', sizes, 0, card.x + 500)
+  expect(moved[2]).toBeCloseTo(sizes[2])
+  expect(moved[0] + moved[1]).toBeCloseTo(sizes[0] + sizes[1])
+  expect(moved[0]).toBeGreaterThan(sizes[0])
+  const squashed = resizeSplit(card, 'row', sizes, 0, card.x - 999)
+  expect(squashed[0]).toBeCloseTo(MIN_PANE)
+})
+
+test('peek card sits inside the page card with room for its toolbar', () => {
+  const r = peekRect(card)
+  expect(r.x).toBeGreaterThanOrEqual(card.x)
+  expect(r.x + r.width).toBeLessThanOrEqual(card.x + card.width)
+  expect(r.y - 40).toBeGreaterThanOrEqual(card.y)
+  expect(r.y + r.height).toBeLessThanOrEqual(card.y + card.height)
+})

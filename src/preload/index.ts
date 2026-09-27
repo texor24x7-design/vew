@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { EMPTY_STATE, IPC, type BrowserState, type Command } from '../shared/ipc'
+import { EMPTY_STATE, IPC, type BrowserState, type Command, type Snapshot } from '../shared/ipc'
 
 // Cache the latest state so a late subscriber (React mounts after the first push) still gets it.
 let state: BrowserState = EMPTY_STATE
@@ -20,6 +20,11 @@ const api = {
     const listener = (): void => cb()
     ipcRenderer.on(IPC.focusUrl, listener)
     return () => ipcRenderer.off(IPC.focusUrl, listener)
+  },
+  onSnapshot: (cb: (snaps: Snapshot[]) => void): (() => void) => {
+    const listener = (_e: unknown, snaps: Snapshot[]): void => cb(snaps)
+    ipcRenderer.on(IPC.snapshot, listener)
+    return () => ipcRenderer.off(IPC.snapshot, listener)
   },
   onToast: (cb: (message: string) => void): (() => void) => {
     const listener = (_e: unknown, message: string): void => cb(message)

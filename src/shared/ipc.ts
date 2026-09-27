@@ -1,3 +1,4 @@
+import type { Rect, SplitDirection } from './layout'
 import { isTheme, type Theme } from './theme'
 
 /** Every IPC channel and payload between main and the shell/overlay renderers. */
@@ -15,7 +16,15 @@ export const IPC = {
   /** main → overlay: animate the command bar out */
   paletteClose: 'vew:palette-close',
   /** overlay → main (invoke): search suggestions for a query → string[] */
-  suggest: 'vew:suggest'
+  suggest: 'vew:suggest',
+  /** main → shell: Snapshot[] of the page panes while a tab is dragged (views are detached meanwhile) */
+  snapshot: 'vew:snapshot',
+  /** main → overlay: PeekInfo to show the Peek chrome, or null to hide it */
+  peek: 'vew:peek',
+  /** main → mini window toolbar: MiniInfo */
+  miniInfo: 'vew:mini-info',
+  /** mini window toolbar → main: MiniAction */
+  miniAction: 'vew:mini-action'
 } as const
 
 /** favorites: icon grid shared across Spaces; pinned: persistent tree with folders; today: auto-archiving. */
@@ -33,6 +42,7 @@ export interface TabState {
   loading: boolean
   canGoBack: boolean
   canGoForward: boolean
+  inSplit: boolean
 }
 
 export interface FolderState {
@@ -72,6 +82,38 @@ export interface Profile {
   name: string
 }
 
+export type Edge = 'left' | 'right' | 'top' | 'bottom'
+
+export interface SplitState {
+  id: number
+  tabIds: number[]
+  direction: SplitDirection
+  sizes: number[]
+}
+
+/** A picture of a page pane, shown in its place while the real view is detached for a drag. */
+export interface Snapshot extends Rect {
+  src: string
+}
+
+/** What the overlay needs to draw Peek's backdrop and toolbar around the floating page. */
+export interface PeekInfo {
+  rect: Rect
+  title: string
+  url: string
+  favicon?: string
+}
+
+/** The mini window's page, for its toolbar. */
+export interface MiniInfo {
+  title: string
+  url: string
+  favicon?: string
+}
+
+export type MiniAction = 'move' | 'close'
+export const isMiniAction = (v: unknown): v is MiniAction => v === 'move' || v === 'close'
+
 export interface BrowserState {
   /** Shared by every Space. */
   favorites: TabState[]
@@ -88,6 +130,8 @@ export interface BrowserState {
   profiles: Profile[]
   /** Space whose editor the shell should open. */
   editSpaceId: number | null
+  /** The split view the active tab is in, if any. */
+  split: SplitState | null
 }
 
 /** A tab as the command bar sees it (from any Space). */
@@ -164,6 +208,12 @@ export type Command =
   | { type: 'copyUrl' }
   | { type: 'toggleDarkMode' }
   | { type: 'clearHistory' }
+  | { type: 'splitWith'; id: number; edge: Edge; targetId?: number }
+  | { type: 'resizeSplit'; sizes: number[] }
+  | { type: 'unsplit'; id: number; all?: boolean }
+  | { type: 'dragging'; on: boolean }
+  | { type: 'peekExpand' }
+  | { type: 'peekClose' }
   | { type: 'back' }
   | { type: 'forward' }
   | { type: 'reload' }
@@ -179,6 +229,8 @@ const isWhere = (v: unknown): boolean => {
   const w = v as Record<string, unknown>
   return ZONES.includes(w.zone as Zone) && (w.parent === null || int(w.parent)) && int(w.index)
 }
+
+const EDGES: readonly Edge[] = ['left', 'right', 'top', 'bottom']
 
 const validators: { [K in Command['type']]: (c: Record<string, unknown>) => boolean } = {
   open: (c) => str(c.input),
@@ -216,6 +268,16 @@ const validators: { [K in Command['type']]: (c: Record<string, unknown>) => bool
   copyUrl: bare,
   toggleDarkMode: bare,
   clearHistory: bare,
+  splitWith: (c) => int(c.id) && EDGES.includes(c.edge as Edge) && opt(c.targetId, int),
+  resizeSplit: (c) =>
+    Array.isArray(c.sizes) &&
+    c.sizes.length >= 2 &&
+    c.sizes.length <= 4 &&
+    c.sizes.every((v) => typeof v === 'number' && Number.isFinite(v) && v > 0 && v < 1),
+  unsplit: (c) => int(c.id) && opt(c.all, (v) => typeof v === 'boolean'),
+  dragging: (c) => typeof c.on === 'boolean',
+  peekExpand: bare,
+  peekClose: bare,
   back: bare,
   forward: bare,
   reload: bare,
@@ -243,5 +305,6 @@ export const EMPTY_STATE: BrowserState = {
   spaces: [],
   activeSpaceId: 0,
   profiles: [],
-  editSpaceId: null
+  editSpaceId: null,
+  split: null
 }

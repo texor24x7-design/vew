@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'motion/react'
 import {
   DndContext,
@@ -14,11 +15,14 @@ import {
   type DragEndEvent,
   type DragMoveEvent
 } from '@dnd-kit/core'
-import { ChevronRight, Folder, Plus, X } from 'lucide-react'
+import { ChevronRight, Columns2, Folder, Plus, X } from 'lucide-react'
 import { Favicon, icon } from '../shared/ui'
+import type { Rect } from '../../shared/layout'
+import { usePageLayout } from './pageLayout'
 import type {
   ArchivedTab,
   BrowserState,
+  Edge,
   FolderState,
   NodeState,
   TabState,
@@ -38,10 +42,16 @@ interface Slot {
   grid?: boolean
   childCount?: number
 }
+/** The page area: dropping a tab here splits it with the pane under the pointer. */
+interface PageSlot {
+  kind: 'page'
+  panes: { id: number; rect: Rect }[]
+}
 interface Drop {
-  where: Where
+  where?: Where
+  split?: { edge: Edge; targetId: number; highlight: Rect }
   target: string | number
-  pos: 'before' | 'after' | 'into' | 'end'
+  pos: 'before' | 'after' | 'into' | 'end' | 'split'
 }
 
 const DropCtx = createContext<Drop | null>(null)
@@ -67,7 +77,9 @@ const collide: CollisionDetection = (args) => {
 function dropFor(e: DragMoveEvent | DragEndEvent, dragged: NodeState | null): Drop | null {
   const { over } = e
   if (!over || !dragged) return null
-  const slot = over.data.current as Slot
+  const data = over.data.current as Slot | PageSlot
+  if (data.kind === 'page') return splitDrop(e, dragged, data, over.id)
+  const slot = data
   // Only pinned can hold folders.
   if (dragged.kind === 'folder' && slot.zone !== 'pinned') return null
   if (slot.id === dragged.id) return null
@@ -98,8 +110,69 @@ function dropFor(e: DragMoveEvent | DragEndEvent, dragged: NodeState | null): Dr
   }
 }
 
+/** Which pane the pointer is over, and which of its edges it's nearest: that's where the tab will go. */
+function splitDrop(
+  e: DragMoveEvent | DragEndEvent,
+  dragged: NodeState,
+  page: PageSlot,
+  target: string | number
+): Drop | null {
+  if (dragged.kind !== 'tab' || !page.panes.length) return null
+  const start = e.activatorEvent as PointerEvent
+  const x = start.clientX + e.delta.x
+  const y = start.clientY + e.delta.y
+  const inside = (r: Rect): boolean =>
+    x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height
+  const pane = page.panes.find((p) => inside(p.rect)) ?? page.panes[0]
+  if (page.panes.length === 1 && pane.id === dragged.id) return null
+  const r = pane.rect
+  const dist: Record<Edge, number> = {
+    left: x - r.x,
+    right: r.x + r.width - x,
+    top: y - r.y,
+    bottom: r.y + r.height - y
+  }
+  const edge = (Object.keys(dist) as Edge[]).reduce((a, b) => (dist[a] <= dist[b] ? a : b))
+  const half = (edge === 'left' || edge === 'right' ? r.width : r.height) / 2
+  const highlight: Rect =
+    edge === 'left'
+      ? { ...r, width: half }
+      : edge === 'right'
+        ? { ...r, x: r.x + half, width: half }
+        : edge === 'top'
+          ? { ...r, height: half }
+          : { ...r, y: r.y + half, height: half }
+  return { split: { edge, targetId: pane.id, highlight }, target, pos: 'split' }
+}
+
 const sameDrop = (a: Drop | null, b: Drop | null): boolean =>
   JSON.stringify(a) === JSON.stringify(b)
+
+/** The page area as a drop target (rendered over the page card; the real views are detached while dragging). */
+function PageDrop({ state }: { state: BrowserState }): React.JSX.Element {
+  const { card, panes } = usePageLayout(state)
+  const { setNodeRef } = useDroppable({
+    id: 'page',
+    data: { kind: 'page', panes } satisfies PageSlot
+  })
+  const drop = useContext(DropCtx)
+  const h = drop?.split?.highlight
+  return createPortal(
+    <div
+      ref={setNodeRef}
+      className="pointer-events-none fixed"
+      style={{ left: card.x, top: card.y, width: card.width, height: card.height }}
+    >
+      {h && (
+        <div
+          className="absolute rounded-[10px] bg-blue-500/15 ring-2 ring-blue-500/60"
+          style={{ left: h.x - card.x, top: h.y - card.y, width: h.width, height: h.height }}
+        />
+      )}
+    </div>,
+    document.body
+  )
+}
 
 export function findNode(nodes: NodeState[], id: number): NodeState | null {
   for (const n of nodes) {
@@ -121,6 +194,7 @@ export function Tabs({ state }: { state: BrowserState }): React.JSX.Element {
   const reset = (): void => {
     setDragged(null)
     setDrop(null)
+    send({ type: 'dragging', on: false })
   }
 
   return (
@@ -129,14 +203,23 @@ export function Tabs({ state }: { state: BrowserState }): React.JSX.Element {
       collisionDetection={collide}
       // Drop zones (e.g. "Drop here to pin") appear only once a drag starts, so keep measuring.
       measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
-      onDragStart={(e) => setDragged(findNode(all, Number(e.active.id)))}
+      onDragStart={(e) => {
+        setDragged(findNode(all, Number(e.active.id)))
+        // Main swaps the pages for pictures so the pointer can reach the page area (to split).
+        send({ type: 'dragging', on: true })
+      }}
       onDragMove={(e) => {
         const next = dropFor(e, dragged)
         if (!sameDrop(next, drop)) setDrop(next)
       }}
       onDragEnd={(e) => {
         const d = dropFor(e, dragged)
-        if (d && dragged) send({ type: 'move', id: dragged.id, where: d.where })
+        if (dragged && d?.split) {
+          const { edge, targetId } = d.split
+          send({ type: 'splitWith', id: dragged.id, edge, targetId })
+        } else if (dragged && d?.where) {
+          send({ type: 'move', id: dragged.id, where: d.where })
+        }
         reset()
       }}
       onDragCancel={reset}
@@ -146,6 +229,7 @@ export function Tabs({ state }: { state: BrowserState }): React.JSX.Element {
       >
         <DropCtx.Provider value={drop}>
           <Favorites tabs={state.favorites} dragging={dragged !== null} />
+          <PageDrop state={state} />
           <div className="-mx-2 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
             <Zone
               zone="pinned"
@@ -312,6 +396,14 @@ function TabRow({ tab, slot }: { tab: TabState; slot: Slot }): React.JSX.Element
       <span className={`min-w-0 flex-1 truncate ${tab.loaded || active ? '' : 'text-(--muted)'}`}>
         {tab.title}
       </span>
+      {tab.inSplit && (
+        <Columns2
+          size={14}
+          strokeWidth={1.5}
+          className="shrink-0 text-(--muted)"
+          aria-label="In split view"
+        />
+      )}
       {closable && (
         <button
           className="grid size-5 shrink-0 place-items-center rounded text-(--muted) opacity-0 group-hover:opacity-100 hover:bg-(--hover)"

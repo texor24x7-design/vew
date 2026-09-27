@@ -134,3 +134,26 @@ test('a corrupt file is kept aside, not trusted', () => {
   expect(load(file)).toBeNull()
   expect(readFileSync(`${file}.corrupt`, 'utf8')).toBe('{not json')
 })
+
+test('splits survive a save/load round trip; broken ones are dropped', () => {
+  const s = emptySaved()
+  s.spaces[0].today = ['a', 'b', 'c'].map((u) => ({
+    kind: 'tab' as const,
+    url: `https://${u}`,
+    title: u,
+    lastActive: 1
+  }))
+  s.spaces[0].splits = [
+    { tabs: [2, 0], direction: 'column', sizes: [0.7, 0.3] },
+    { tabs: [1, 9], direction: 'row', sizes: [0.5, 0.5] } // tab 9 doesn't exist
+  ]
+  let id = 100
+  const live = toLive(sanitize(JSON.parse(JSON.stringify(s))), () => ++id)
+  const [split] = live.spaces[0].splits
+  expect(live.spaces[0].splits).toHaveLength(1)
+  expect(split.tabIds).toEqual([live.spaces[0].today[2].id, live.spaces[0].today[0].id])
+  expect(split).toMatchObject({ direction: 'column', sizes: [0.7, 0.3] })
+  expect(fromLive(live).spaces[0].splits).toEqual([
+    { tabs: [2, 0], direction: 'column', sizes: [0.7, 0.3] }
+  ])
+})
