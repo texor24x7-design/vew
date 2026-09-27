@@ -50,6 +50,16 @@ import { toUrl, type SearchEngine } from '../shared/url'
 import { blockedOn, blockerEvents, resetBlocked } from './adblock'
 import { clearDownloads, downloadAction, downloadList, downloads } from './downloads'
 import { history } from './history'
+import {
+  clickAction,
+  extensionMenuItems,
+  extensionStates,
+  optionsUrl,
+  removeExtension,
+  setExtensionHost,
+  tabActivated,
+  watchTab
+} from './extensions'
 import { isInternalUrl } from './internal'
 import { originOf } from './permissions'
 import { settings } from './settings'
@@ -135,6 +145,19 @@ const hostOf = (url: string): string => {
   }
 }
 
+/**
+ * Which kind of page a URL is: Vew's internal pages, one extension's pages, or the web. Each kind runs with a
+ * different preload (or none), so a tab never navigates from one kind to another.
+ */
+const pageKind = (url: string): string =>
+  isInternalUrl(url)
+    ? 'internal'
+    : url.startsWith('chrome-extension://')
+      ? `ext:${hostOf(url)}`
+      : 'web'
+const CRX_PRELOAD = (): string => join(__dirname, '../preload/crx.js')
+const POPUP_MAX = { width: 800, height: 600 }
+
 /** Load one of the renderer pages (shell, overlay) from the dev server or the build. */
 export function loadPage(
   wc: WebContents,
@@ -183,6 +206,12 @@ export class VewWindow {
   /** The find bar is showing (the overlay shrinks to just the bar, so the page stays usable). */
   private findOpen = false
   private pushTimer?: NodeJS.Timeout
+  /** An extension's toolbar popup, floating under its icon. */
+  private popup: {
+    view: WebContentsView
+    anchor: { x: number; y: number }
+    size: { width: number; height: number }
+  } | null = null
   /** Peek: a link from a pinned tab or favorite, floating over the page. */
   private peek: { view: WebContentsView; from: Tab; info: Omit<PeekInfo, 'rect'> } | null = null
   private paletteFallback?: NodeJS.Timeout
@@ -269,6 +298,7 @@ export class VewWindow {
       blockerEvents.off('blocked', onBlocked)
       clearTimeout(this.pushTimer)
     })
+    this.registerExtensionHost()
     ipcMain.handle(IPC.suggest, (e, query: unknown) =>
       e.sender === overlay && typeof query === 'string' && query.length <= 200 ? suggest(query) : []
     )
@@ -382,8 +412,8 @@ export class VewWindow {
       case 'navigate': {
         const url = toUrl(cmd.input, engine())
         if (!url) return
-        // Internal pages and websites never share a tab (they run in different sessions).
-        if (!wc || !active || isInternalUrl(url) !== isInternalUrl(active.url)) {
+        // Internal pages, extension pages and websites never share a tab (different preloads/sessions).
+        if (!wc || !active || pageKind(url) !== pageKind(active.url)) {
           return this.run({ type: 'open', input: cmd.input })
         }
         load(wc, url)
@@ -523,7 +553,7 @@ export class VewWindow {
       case 'peekClose':
         return this.closePeek()
       case 'openFind':
-        if (!wc || !active || isInternalUrl(active.url)) return
+        if (!wc || !active || pageKind(active.url) !== 'web') return
         this.closePeek()
         if (this.paletteOpen) this.closePalette()
         this.findOpen = true
@@ -601,6 +631,16 @@ export class VewWindow {
         return downloadAction(cmd.id, cmd.action)
       case 'clearDownloads':
         return clearDownloads()
+      case 'extensionClick': {
+        const ses = sessionFor(this.space.profileId)
+        const url = clickAction(cmd.id, ses, wc)
+        if (url) this.openPopup(url, cmd.anchor)
+        return
+      }
+      case 'extensionMenu':
+        return this.extensionMenu(cmd.id)
+      case 'closePopup':
+        return this.closePopup()
       case 'back':
         if (wc?.navigationHistory.canGoBack()) wc.navigationHistory.goBack()
         return
@@ -663,13 +703,21 @@ export class VewWindow {
             source
               ? { webContents: source }
               : {
-                  webPreferences: isInternalUrl(tab.url)
-                    ? {
-                        ...secureWebPreferences,
-                        session: session.defaultSession,
-                        preload: join(__dirname, '../preload/internal.js')
-                      }
-                    : { ...secureWebPreferences, session: sessionFor(tab.profileId) }
+                  webPreferences:
+                    pageKind(tab.url) === 'internal'
+                      ? {
+                          ...secureWebPreferences,
+                          session: session.defaultSession,
+                          preload: join(__dirname, '../preload/internal.js')
+                        }
+                      : pageKind(tab.url) === 'web'
+                        ? { ...secureWebPreferences, session: sessionFor(tab.profileId) }
+                        : // An extension's own page (e.g. its options) opened as a tab.
+                          {
+                            ...secureWebPreferences,
+                            session: sessionFor(tab.profileId),
+                            preload: CRX_PRELOAD()
+                          }
                 }
           )
     view.setBorderRadius(PAGE_RADIUS)
@@ -696,12 +744,17 @@ export class VewWindow {
     wc.on('did-start-navigation', (e) => {
       if (e.isMainFrame && !e.isSameDocument) resetBlocked(wc.id)
     })
-    // An internal page (privileged preload) must never show a website, and a website never an internal page.
-    const internal = isInternalUrl(tab.url)
+    // A page with a privileged preload (internal or extension) never shows a website, and vice versa.
+    const kind = pageKind(tab.url)
+    const internal = kind !== 'web'
     const guard = (e: Electron.Event<{ url: string; isMainFrame: boolean }>): void => {
-      if (!e.isMainFrame || isInternalUrl(e.url) === internal) return
+      if (!e.isMainFrame || pageKind(e.url) === kind) return
       e.preventDefault()
-      if (internal && /^https?:/.test(e.url)) this.openTab(e.url, { activate: true })
+      if (/^https?:/.test(e.url)) this.openTab(e.url, { activate: true })
+    }
+    if (kind === 'web') {
+      watchTab(wc)
+      wc.on('context-menu', (_e, params) => this.pageMenu(tab, wc, params))
     }
     wc.on('will-navigate', guard)
     wc.on('will-redirect', guard)
@@ -784,7 +837,10 @@ export class VewWindow {
     this.present()
     // A video playing in the tab we just left keeps going in picture-in-picture.
     if (prev?.view && !this.shown.includes(prev.view)) inIsolation(prev.view.webContents, PIP_ENTER)
-    if (node.view) inIsolation(node.view.webContents, PIP_EXIT)
+    if (node.view) {
+      inIsolation(node.view.webContents, PIP_EXIT)
+      tabActivated(node.view.webContents)
+    }
     if (!this.paletteOpen && !this.peek) node.view?.webContents.focus()
     this.push()
   }
@@ -877,10 +933,11 @@ export class VewWindow {
     const views = this.dragging ? [] : this.visibleTabs().map((t) => this.ensureView(t))
     for (const v of this.shown) if (!views.includes(v)) this.win.contentView.removeChildView(v)
     for (const v of views) this.win.contentView.addChildView(v)
-    if (this.paletteOpen || this.peek || this.findOpen)
+    if (this.paletteOpen || this.peek || this.findOpen || this.popup) {
       this.win.contentView.addChildView(this.overlay)
-    else this.win.contentView.removeChildView(this.overlay)
+    } else this.win.contentView.removeChildView(this.overlay)
     if (this.peek) this.win.contentView.addChildView(this.peek.view)
+    if (this.popup) this.win.contentView.addChildView(this.popup.view)
     this.shown = views
     this.layout()
   }
@@ -1224,6 +1281,7 @@ export class VewWindow {
     }
     this.closePeek()
     this.closeFind()
+    this.closePopup()
     this.paletteOpen = true
     this.present()
     const wc = this.overlay.webContents
@@ -1359,8 +1417,17 @@ export class VewWindow {
     const rects: Rect[] = split ? splitRects(card, split.direction, split.sizes) : [card]
     // Full window for the command bar and Peek; just the bar (top-right of the active pane) for find.
     const pane = rects[this.shown.findIndex((v) => v === active?.view)] ?? card
+    if (this.popup) {
+      const { anchor, size } = this.popup
+      this.popup.view.setBounds({
+        x: Math.max(8, Math.min(anchor.x, width - size.width - 8)),
+        y: Math.max(8, Math.min(anchor.y, height - size.height - 8)),
+        width: size.width,
+        height: size.height
+      })
+    }
     this.overlay.setBounds(
-      this.paletteOpen || this.peek
+      this.paletteOpen || this.peek || this.popup
         ? { x: 0, y: 0, width, height }
         : {
             x: pane.x + pane.width - FIND_BAR.width - 12,
@@ -1440,11 +1507,221 @@ export class VewWindow {
         return split ? { ...split, tabIds: [...split.tabIds], sizes: [...split.sizes] } : null
       })(),
       downloads: downloadList(),
-      site: this.siteInfo()
+      site: this.siteInfo(),
+      extensions: extensionStates(
+        sessionFor(this.space.profileId),
+        this.active()?.view?.webContents.id
+      )
     }
     this.win.webContents.send(IPC.state, state)
     clearTimeout(this.saveTimer)
     this.saveTimer = setTimeout(() => this.save(), 500)
+  }
+
+  /** The extension system reaches Vew's tabs through this. */
+  private registerExtensionHost(): void {
+    // A view whose page was just destroyed has no webContents left (see closeView).
+    const liveWc = (t: Tab): WebContents | undefined => {
+      const wc = t.view?.webContents as WebContents | undefined
+      return wc && !wc.isDestroyed() ? wc : undefined
+    }
+    const loaded = (ses: Electron.Session): Tab[] =>
+      tabsInOrder(this.zones).filter((t) => liveWc(t)?.session === ses && pageKind(t.url) === 'web')
+    const byWc = (wc: WebContents): Tab | undefined =>
+      this.allTabs().find((t) => t.view?.webContents === wc)
+    setExtensionHost({
+      windowId: () => this.win.id,
+      tabs: (ses) =>
+        loaded(ses).map((t) => ({
+          wc: liveWc(t)!,
+          active: t.id === this.activeId,
+          pinned: this.find(t.id)?.loc.zone !== 'today',
+          title: t.title,
+          url: t.url,
+          favicon: t.favicon,
+          loading: t.loading
+        })),
+      openTab: (url, active) => {
+        const tab = this.openTab(url, { activate: active })
+        return this.ensureView(tab).webContents
+      },
+      activateTab: (wc) => {
+        const t = byWc(wc)
+        if (t) this.activate(t.id)
+      },
+      closeTab: (wc) => {
+        const t = byWc(wc)
+        if (t) this.closeTab(t.id)
+      },
+      openPopup: (_extId, url) => this.openPopup(url, this.popup?.anchor ?? { x: 16, y: 120 }),
+      changed: () => this.schedulePush()
+    })
+  }
+
+  private openPopup(url: string, anchor: { x: number; y: number }): void {
+    this.closePopup()
+    this.closeFind()
+    this.closePeek()
+    if (this.paletteOpen) this.closePalette()
+    const extId = hostOf(url)
+    const view = new WebContentsView({
+      webPreferences: {
+        ...secureWebPreferences,
+        session: sessionFor(this.space.profileId),
+        preload: CRX_PRELOAD(),
+        enablePreferredSizeMode: true
+      }
+    })
+    view.setBorderRadius(PAGE_RADIUS)
+    view.setBackgroundColor('#ffffff')
+    const wc = view.webContents
+    const popup = { view, anchor, size: { width: 320, height: 240 } }
+    wc.on('preferred-size-changed', (_e, size) => {
+      popup.size = {
+        width: Math.min(POPUP_MAX.width, Math.max(25, size.width)),
+        height: Math.min(POPUP_MAX.height, Math.max(25, size.height))
+      }
+      if (this.popup === popup) this.layout()
+    })
+    wc.on('before-input-event', (e, input) => {
+      if (input.type === 'keyDown' && input.key === 'Escape') {
+        e.preventDefault()
+        this.closePopup()
+      }
+    })
+    // The popup only ever shows its own extension's pages; links open as tabs.
+    wc.on('will-navigate', (e) => {
+      if (hostOf(e.url) === extId && e.url.startsWith('chrome-extension://')) return
+      e.preventDefault()
+      if (/^https?:/.test(e.url)) this.openTab(e.url, { activate: true })
+    })
+    wc.setWindowOpenHandler((details) => {
+      if (/^https?:/.test(details.url) || details.url.startsWith(`chrome-extension://${extId}/`)) {
+        this.openTab(details.url, { activate: true })
+      }
+      return { action: 'deny' }
+    })
+    wc.on('destroyed', () => this.popup === popup && this.closePopup())
+    load(wc, url)
+    this.popup = popup
+    this.present()
+    this.overlay.webContents.send(IPC.popup, true)
+    wc.focus()
+  }
+
+  private closePopup(): void {
+    if (!this.popup) return
+    const { view } = this.popup
+    this.popup = null
+    this.win.contentView.removeChildView(view)
+    closeView(view)
+    this.overlay.webContents.send(IPC.popup, false)
+    this.present()
+  }
+
+  private extensionMenu(id: string): void {
+    const ses = sessionFor(this.space.profileId)
+    const ext = ses.extensions.getExtension(id)
+    if (!ext) return
+    const options = optionsUrl(id, ses)
+    const items: MenuItemConstructorOptions[] = [
+      { label: ext.name, enabled: false },
+      { type: 'separator' },
+      ...(options
+        ? [{ label: 'Options', click: () => this.openTab(options, { activate: true }) }]
+        : []),
+      {
+        label: 'Remove Extension…',
+        click: async () => {
+          const { response } = await dialog.showMessageBox(this.win, {
+            type: 'warning',
+            message: `Remove “${ext.name}”?`,
+            buttons: ['Remove', 'Cancel'],
+            defaultId: 1,
+            cancelId: 1
+          })
+          if (response === 0) await removeExtension(id)
+        }
+      },
+      {
+        label: 'Manage Extensions',
+        click: () => this.run({ type: 'openInternal', page: 'settings' })
+      }
+    ]
+    Menu.buildFromTemplate(items).popup({ window: this.win })
+  }
+
+  /** Right-click menu for web pages, with extensions' items. */
+  private pageMenu(tab: Tab, wc: WebContents, p: Electron.ContextMenuParams): void {
+    const items: MenuItemConstructorOptions[] = []
+    const sep = (): void => {
+      if (items.length && items.at(-1)?.type !== 'separator') items.push({ type: 'separator' })
+    }
+    if (p.linkURL && /^https?:/.test(p.linkURL)) {
+      items.push(
+        {
+          label: 'Open Link in New Tab',
+          click: () => this.openTab(p.linkURL, { activate: false, opener: tab })
+        },
+        { label: 'Copy Link', click: () => void clipboard.writeText(p.linkURL) }
+      )
+      sep()
+    }
+    if (p.mediaType === 'image' && /^(https?|data):/.test(p.srcURL)) {
+      items.push(
+        {
+          label: 'Open Image in New Tab',
+          click: () => this.openTab(p.srcURL, { activate: false, opener: tab })
+        },
+        { label: 'Copy Image', click: () => wc.copyImageAt(p.x, p.y) }
+      )
+      sep()
+    }
+    if (p.isEditable) {
+      items.push(
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' }
+      )
+      sep()
+    } else if (p.selectionText.trim()) {
+      const text = p.selectionText.trim()
+      items.push(
+        { role: 'copy' },
+        {
+          label: `Search ${ENGINE_NAMES[engine()]} for “${text.length > 24 ? text.slice(0, 24) + '…' : text}”`,
+          click: () => this.openTab(toUrl(text, engine()), { activate: true })
+        }
+      )
+      sep()
+    }
+    if (!p.linkURL && !p.isEditable && !p.selectionText && p.mediaType === 'none') {
+      items.push(
+        {
+          label: 'Back',
+          enabled: wc.navigationHistory.canGoBack(),
+          click: () => wc.navigationHistory.goBack()
+        },
+        {
+          label: 'Forward',
+          enabled: wc.navigationHistory.canGoForward(),
+          click: () => wc.navigationHistory.goForward()
+        },
+        { label: 'Reload', click: () => wc.reload() }
+      )
+      sep()
+    }
+    const ext = extensionMenuItems(wc, p)
+    if (ext.length) {
+      items.push(...ext)
+      sep()
+    }
+    items.push({ label: 'Inspect', click: () => wc.inspectElement(p.x, p.y) })
+    Menu.buildFromTemplate(items).popup({ window: this.win })
   }
 
   /** For noisy sources (download progress, blocked requests): at most a few pushes a second. */

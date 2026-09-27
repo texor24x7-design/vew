@@ -1,5 +1,6 @@
 import { session, type Session } from 'electron'
 import { installBlocker } from './adblock'
+import { attachExtensions } from './extensions'
 import { trackDownloads } from './downloads'
 import { installPermissions } from './permissions'
 import { settings } from './settings'
@@ -26,6 +27,7 @@ export function sessionFor(profileId: string): Session {
     installPermissions(ses)
     installBlocker(ses, blockerOn)
     trackDownloads(ses)
+    void attachExtensions(ses)
   }
   return ses
 }

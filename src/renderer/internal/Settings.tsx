@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import type { InternalRequest, SettingsView } from '../../shared/ipc'
+import { Puzzle } from 'lucide-react'
+import type { ExtensionInfo, InternalRequest, SettingsView } from '../../shared/ipc'
 import { button, call, muted } from './api'
 
 type Patch = Extract<InternalRequest, { method: 'setSettings' }>['patch']
@@ -137,6 +138,7 @@ export function SettingsPage(): React.JSX.Element {
           </button>
         </Row>
       </Section>
+      <ExtensionsSection />
       <Section title="Appearance">
         <Row label="Theme">
           <div
@@ -161,5 +163,84 @@ export function SettingsPage(): React.JSX.Element {
         </Row>
       </Section>
     </main>
+  )
+}
+
+/** Installed extensions; add from the Chrome Web Store (link or id) or from a folder. */
+function ExtensionsSection(): React.JSX.Element {
+  const [list, setList] = useState<ExtensionInfo[]>([])
+  const [source, setSource] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    void call<ExtensionInfo[]>({ method: 'extList' }).then(setList)
+  }, [])
+  const run = async (req: InternalRequest): Promise<void> => {
+    setBusy(true)
+    setError('')
+    try {
+      setList(await call<ExtensionInfo[]>(req))
+      setSource('')
+    } catch (err) {
+      // Errors from main arrive as "Error invoking remote method …: Error: <message>".
+      setError(String(err).replace(/^.*Error: /, ''))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Section title="Extensions">
+      {list.map((ext) => (
+        <Row
+          key={ext.id}
+          label={`${ext.name} ${ext.version}`}
+          hint={ext.unpacked ? `Unpacked · ${ext.path}` : ext.description}
+        >
+          <button
+            className={button}
+            disabled={busy}
+            onClick={() => run({ method: 'extRemove', id: ext.id })}
+          >
+            Remove
+          </button>
+        </Row>
+      ))}
+      {!list.length && (
+        <div className={`flex items-center gap-2 py-4 text-[13px] ${muted}`}>
+          <Puzzle size={16} strokeWidth={1.5} /> No extensions yet.
+        </div>
+      )}
+      <form
+        className="flex items-center gap-2 border-t border-black/5 py-3 dark:border-white/10"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (source.trim()) void run({ method: 'extInstall', source: source.trim() })
+        }}
+      >
+        <input
+          value={source}
+          onChange={(e) => setSource(e.target.value)}
+          placeholder="Chrome Web Store link or extension ID"
+          aria-label="Chrome Web Store link or extension ID"
+          className={`${select} min-w-0 flex-1`}
+        />
+        <button className={button} disabled={busy || !source.trim()} type="submit">
+          {busy ? 'Installing…' : 'Add'}
+        </button>
+        <button
+          className={button}
+          disabled={busy}
+          type="button"
+          onClick={() => run({ method: 'extLoadUnpacked' })}
+        >
+          Load unpacked…
+        </button>
+      </form>
+      {error && (
+        <p role="alert" className="pb-3 text-[13px] text-red-600 dark:text-red-400">
+          {error}
+        </p>
+      )}
+    </Section>
   )
 }

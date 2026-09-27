@@ -24,7 +24,8 @@ export default defineConfig({
           index: resolve(__dirname, 'src/preload/index.ts'),
           overlay: resolve(__dirname, 'src/preload/overlay.ts'),
           mini: resolve(__dirname, 'src/preload/mini.ts'),
-          internal: resolve(__dirname, 'src/preload/internal.ts')
+          internal: resolve(__dirname, 'src/preload/internal.ts'),
+          crx: resolve(__dirname, 'src/preload/crx.ts')
         }
       }
     }

@@ -29,7 +29,13 @@ export const IPC = {
   /** main → overlay: FindState to show the find bar, or null to hide it */
   find: 'vew:find',
   /** internal vew:// page → main (invoke): InternalRequest → result */
-  internal: 'vew:internal'
+  internal: 'vew:internal',
+  /** extension page / worker → main (invoke): (namespace, method, args[]) → result */
+  crx: 'vew:crx',
+  /** main → extension page / worker: (namespace, event, args[]) */
+  crxEvent: 'vew:crx-event',
+  /** main → overlay: an extension popup is open (true) or closed (false) */
+  popup: 'vew:popup'
 } as const
 
 /** favorites: icon grid shared across Spaces; pinned: persistent tree with folders; today: auto-archiving. */
@@ -184,6 +190,10 @@ export type InternalRequest =
     }
   | { method: 'makeDefaultBrowser' }
   | { method: 'open'; url: string }
+  | { method: 'extList' }
+  | { method: 'extInstall'; source: string }
+  | { method: 'extLoadUnpacked' }
+  | { method: 'extRemove'; id: string }
 
 export interface SettingsView {
   settings: Settings
@@ -208,7 +218,13 @@ export function isInternalRequest(x: unknown): x is InternalRequest {
     case 'historyClear':
     case 'getSettings':
     case 'makeDefaultBrowser':
+    case 'extList':
+    case 'extLoadUnpacked':
       return true
+    case 'extInstall':
+      return str(r.source, 500)
+    case 'extRemove':
+      return isExtensionId(r.id)
     case 'setSettings': {
       if (typeof r.patch !== 'object' || r.patch === null) return false
       const p = r.patch as Record<string, unknown>
@@ -221,6 +237,27 @@ export function isInternalRequest(x: unknown): x is InternalRequest {
     }
   }
   return false
+}
+
+/** An installed extension as the sidebar's icon row shows it. */
+export interface ExtensionState {
+  id: string
+  name: string
+  /** data: URL of the toolbar icon */
+  icon?: string
+  badge: string
+  badgeColor: string
+  hasPopup: boolean
+}
+
+/** Installed extension, for the settings page. */
+export interface ExtensionInfo {
+  id: string
+  name: string
+  version: string
+  description: string
+  unpacked: boolean
+  path: string
 }
 
 export interface BrowserState {
@@ -243,6 +280,7 @@ export interface BrowserState {
   split: SplitState | null
   downloads: DownloadState[]
   site: SiteInfo | null
+  extensions: ExtensionState[]
 }
 
 /** A tab as the command bar sees it (from any Space). */
@@ -337,6 +375,9 @@ export type Command =
   | { type: 'setSiteBlocker'; host: string; enabled: boolean }
   | { type: 'download'; id: string; action: 'open' | 'show' | 'cancel' | 'remove' }
   | { type: 'clearDownloads' }
+  | { type: 'extensionClick'; id: string; anchor: { x: number; y: number } }
+  | { type: 'extensionMenu'; id: string }
+  | { type: 'closePopup' }
   | { type: 'back' }
   | { type: 'forward' }
   | { type: 'reload' }
@@ -352,6 +393,15 @@ const isWhere = (v: unknown): boolean => {
   const w = v as Record<string, unknown>
   return ZONES.includes(w.zone as Zone) && (w.parent === null || int(w.parent)) && int(w.index)
 }
+
+/** Chrome extension ids: 32 letters a–p. */
+export const isExtensionId = (v: unknown): v is string =>
+  typeof v === 'string' && /^[a-p]{32}$/.test(v)
+const isPoint = (v: unknown): boolean =>
+  typeof v === 'object' &&
+  v !== null &&
+  Number.isFinite((v as Record<string, unknown>).x) &&
+  Number.isFinite((v as Record<string, unknown>).y)
 
 const EDGES: readonly Edge[] = ['left', 'right', 'top', 'bottom']
 
@@ -417,6 +467,9 @@ const validators: { [K in Command['type']]: (c: Record<string, unknown>) => bool
   download: (c) =>
     str(c.id, 64) && ['open', 'show', 'cancel', 'remove'].includes(c.action as string),
   clearDownloads: bare,
+  extensionClick: (c) => isExtensionId(c.id) && isPoint(c.anchor),
+  extensionMenu: (c) => isExtensionId(c.id),
+  closePopup: bare,
   back: bare,
   forward: bare,
   reload: bare,
@@ -447,5 +500,6 @@ export const EMPTY_STATE: BrowserState = {
   editSpaceId: null,
   split: null,
   downloads: [],
-  site: null
+  site: null,
+  extensions: []
 }

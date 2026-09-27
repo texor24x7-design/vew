@@ -21,6 +21,8 @@
     "@types/node": "^26.6.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/yauzl": "^3.4.0",
+    "@types/yazl": "^3.3.1",
     "@vitejs/plugin-react": "^5.2.0",
     "cmdk": "^1.1.1",
     "electron": "^44.4.5",
@@ -36,9 +38,11 @@
     "typescript": "6.0",
     "typescript-eslint": "^8.70.1",
     "vite": "^7.3.6",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.2",
+    "yazl": "^3.3.1"
   },
   "dependencies": {
-    "@ghostery/adblocker": "^2.18.2"
+    "@ghostery/adblocker": "^2.18.2",
+    "yauzl": "^3.4.0"
   }
 }

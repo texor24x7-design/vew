@@ -2,6 +2,7 @@ import { join, normalize } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, session } from 'electron'
 import { IPC, isInternalRequest, type InternalRequest, type SettingsView } from '../shared/ipc'
+import { installFromStore, listExtensions, loadUnpacked, removeExtension } from './extensions'
 import { history } from './history'
 import { settings } from './settings'
 
@@ -78,6 +79,14 @@ async function handle(req: InternalRequest, openUrl: (url: string) => void): Pro
       return settingsView()
     case 'open':
       return openUrl(req.url)
+    case 'extList':
+      return listExtensions()
+    case 'extInstall':
+      return installFromStore(req.source)
+    case 'extLoadUnpacked':
+      return loadUnpacked()
+    case 'extRemove':
+      return removeExtension(req.id)
   }
 }
 

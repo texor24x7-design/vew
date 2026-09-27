@@ -7,6 +7,7 @@ import { DEFAULT_THEME, palette } from '../../shared/theme'
 import { displayHost } from '../../shared/url'
 import { icon } from '../shared/ui'
 import { DownloadsButton, DownloadsList, SiteButton, SitePopover } from './Essentials'
+import { ExtensionRow } from './ExtensionRow'
 import { PageArea } from './PageArea'
 import { ArchiveList, Tabs, findNode } from './Sidebar'
 import { SpaceEditor, SpaceSwitcher, themeVars, useSpaceSwipe, useSystemDark } from './Spaces'
@@ -89,6 +90,7 @@ export default function App(): React.JSX.Element {
         >
           <NavRow active={active} />
           <UrlPill active={active} collapsed={sidebar.collapsed} site={state.site} />
+          <ExtensionRow extensions={state.extensions} />
           {panel === 'archive' ? (
             <>
               <h2 className="px-2 pt-1 text-[12px] font-medium text-(--muted)">Archive</h2>

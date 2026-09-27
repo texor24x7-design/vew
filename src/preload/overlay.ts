@@ -19,6 +19,11 @@ const api = {
     ipcRenderer.on(IPC.find, listener)
     return () => ipcRenderer.off(IPC.find, listener)
   },
+  onPopup: (cb: (open: boolean) => void): (() => void) => {
+    const listener = (_e: unknown, open: boolean): void => cb(open)
+    ipcRenderer.on(IPC.popup, listener)
+    return () => ipcRenderer.off(IPC.popup, listener)
+  },
   onClose: (cb: () => void): (() => void) => {
     const listener = (): void => cb()
     ipcRenderer.on(IPC.paletteClose, listener)
