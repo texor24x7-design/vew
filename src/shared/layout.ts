@@ -4,6 +4,8 @@ export const SIDEBAR_DEFAULT_WIDTH = 240
 export const SIDEBAR_MIN_WIDTH = 180
 export const SIDEBAR_MAX_WIDTH = 360
 export const PAGE_INSET = 8
+/** Width of the icon rail a collapsed sidebar shrinks to. */
+export const RAIL_WIDTH = 52
 export const PAGE_RADIUS = 10
 /** Height of the Windows caption-button strip drawn by titleBarOverlay. */
 export const WIN_TITLEBAR_HEIGHT = 40
@@ -23,8 +25,9 @@ export const pageTop = (platform: string): number =>
   platform === 'win32' ? WIN_TITLEBAR_HEIGHT : PAGE_INSET
 
 /**
- * Bounds of the page card inside a window content area of the given size.
- * While peeking, the card slides right but keeps its collapsed width, so the page doesn't reflow.
+ * Bounds of the page card inside a window content area of the given size. Collapsed, the sidebar leaves
+ * an icon rail. While the full sidebar is revealed from the keyboard (Cmd+L, F6), the card slides right but
+ * keeps its collapsed width, so the page doesn't reflow.
  */
 export function pageBounds(
   width: number,
@@ -32,7 +35,7 @@ export function pageBounds(
   platform: string,
   sidebar: SidebarState
 ): Rect {
-  const left = sidebar.collapsed ? 0 : sidebar.width
+  const left = sidebar.collapsed ? RAIL_WIDTH : sidebar.width
   const x = (sidebar.collapsed && sidebar.peek ? sidebar.width : left) + PAGE_INSET
   const y = pageTop(platform)
   return {

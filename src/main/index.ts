@@ -1,6 +1,7 @@
 import { app, BrowserWindow, nativeTheme, session } from 'electron'
 import { loadBlocker } from './adblock'
 import { registerInternalScheme, serveInternalPages } from './internal'
+import { installMenu } from './menu'
 import { MiniWindow } from './mini'
 import { settings } from './settings'
 import { VewWindow } from './window'
@@ -69,6 +70,10 @@ if (!app.requestSingleInstanceLock()) {
       finishWelcome: () => mainWindow().finishWelcome()
     })
     void loadBlocker()
+    installMenu(
+      (cmd) => mainWindow().run(cmd),
+      (w) => main !== null && w === main.win
+    )
     mainWindow()
     // Launched to open a link (Windows passes it as an argument; macOS queued it above).
     for (const url of [...process.argv.slice(1).filter(isWebUrl), ...pending.splice(0)])

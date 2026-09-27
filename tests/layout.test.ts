@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest'
 import {
   PAGE_INSET,
+  RAIL_WIDTH,
   WIN_TITLEBAR_HEIGHT,
   clampSidebarWidth,
   pageBounds
@@ -21,10 +22,10 @@ test('windows leaves room for the caption buttons', () => {
   expect(pageBounds(1280, 820, 'win32', open).y).toBe(WIN_TITLEBAR_HEIGHT)
 })
 
-test('collapsed sidebar gives the page the full width', () => {
+test('collapsed sidebar leaves an icon rail; the page gets the rest', () => {
   const r = pageBounds(1280, 820, 'darwin', { ...open, collapsed: true })
-  expect(r.x).toBe(PAGE_INSET)
-  expect(r.width).toBe(1280 - 2 * PAGE_INSET)
+  expect(r.x).toBe(RAIL_WIDTH + PAGE_INSET)
+  expect(r.width).toBe(1280 - RAIL_WIDTH - 2 * PAGE_INSET)
 })
 
 test('peeking slides the card right without resizing it (no reflow)', () => {

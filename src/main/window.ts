@@ -27,6 +27,7 @@ import {
   type PaletteData,
   type PaletteTab,
   type PeekInfo,
+  type RailLabel,
   type SiteInfo,
   type Snapshot,
   type Profile,
@@ -37,6 +38,7 @@ import {
   MAX_SPLIT,
   MIN_PANE,
   PAGE_RADIUS,
+  RAIL_WIDTH,
   WIN_TITLEBAR_HEIGHT,
   clampSidebarWidth,
   evenSizes,
@@ -208,6 +210,8 @@ export class VewWindow {
   /** The find bar is showing (the overlay shrinks to just the bar, so the page stays usable). */
   private findOpen = false
   private pushTimer?: NodeJS.Timeout
+  /** The collapsed rail's hovered icon: its tab and vertical center, for the floating title pill. */
+  private label: { id: number; y: number } | null = null
   /** Where the user last put keyboard focus; restored whenever the window is activated. */
   private focusTarget: 'page' | 'sidebar' = 'page'
   /** An extension's toolbar popup, floating under its icon. */
@@ -530,6 +534,7 @@ export class VewWindow {
       }
       case 'toggleSidebar':
         this.sidebar = { ...this.sidebar, collapsed: !this.sidebar.collapsed, peek: false }
+        this.railHover(null)
         this.updateTrafficLights()
         this.layout(true)
         return this.push()
@@ -639,24 +644,9 @@ export class VewWindow {
         return
       case 'closeFind':
         return this.closeFind()
-      case 'zoom': {
-        if (!wc || !active) return
-        const host = hostOf(active.url)
-        const current = wc.getZoomFactor()
-        const i = ZOOM_STEPS.findIndex((z) => z >= current - 0.001)
-        const next =
-          cmd.delta === 0
-            ? 1
-            : ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, Math.max(0, (i < 0 ? 7 : i) + cmd.delta))]
-        wc.setZoomFactor(next)
-        if (host) {
-          settings.update((s) => {
-            if (next === 1) delete s.zoom[host]
-            else s.zoom[host] = next
-          })
-        }
-        return this.toast(`Zoom ${Math.round(next * 100)}%`)
-      }
+      case 'zoom':
+        if (active) this.zoomPage(active, cmd.delta)
+        return
       case 'print':
         return wc?.print()
       case 'viewSource':
@@ -709,6 +699,8 @@ export class VewWindow {
         return this.extensionMenu(cmd.id)
       case 'closePopup':
         return this.closePopup()
+      case 'railHover':
+        return this.railHover(cmd.id, cmd.y)
       case 'back':
         if (wc?.navigationHistory.canGoBack()) wc.navigationHistory.goBack()
         return
@@ -815,6 +807,29 @@ export class VewWindow {
     wc.on('did-start-navigation', (e) => {
       if (e.isMainFrame && !e.isSameDocument) resetBlocked(wc.id)
     })
+    // Ctrl+scroll steps the page zoom (Windows/Linux, like Chrome; macOS keeps Ctrl+scroll for its own
+    // accessibility zoom, so there pinch and Cmd +/- are the way). Electron reports it as zoom-changed; if a
+    // wheel event reaches us first we handle it here, which stops zoom-changed firing too.
+    wc.on('zoom-changed', (_e, direction) => this.zoomPage(tab, direction === 'in' ? 1 : -1))
+    let wheel = 0
+    let wheelAt = 0
+    wc.on('before-mouse-event', (e, m) => {
+      if (m.type !== 'mouseWheel') return
+      const mods = m.modifiers ?? []
+      if (!mods.includes('control') && !(isMac && mods.includes('meta'))) return
+      e.preventDefault()
+      const now = Date.now()
+      if (now - wheelAt > 300) wheel = 0
+      wheelAt = now
+      wheel += (m as Electron.MouseWheelInputEvent).deltaY ?? 0
+      if (Math.abs(wheel) >= 100) {
+        // Wheel away from you (positive deltaY in Electron's events) zooms in.
+        this.zoomPage(tab, wheel > 0 ? 1 : -1)
+        wheel = 0
+      }
+    })
+    // Trackpad pinch: smooth zoom of the page, like Chrome (Electron has it off by default).
+    wc.once('dom-ready', () => void wc.setVisualZoomLevelLimits(1, 3).catch(() => {}))
     // A page with a privileged preload (internal or extension) never shows a website, and vice versa.
     const kind = pageKind(tab.url)
     const internal = kind !== 'web'
@@ -946,6 +961,27 @@ export class VewWindow {
     this.schedulePush()
   }
 
+  /** Step a tab's zoom (Chrome's steps), remembered per site. Keyboard, menu, and Ctrl/Cmd+scroll all land here. */
+  private zoomPage(tab: Tab, delta: 1 | -1 | 0): void {
+    const wc = tab.view?.webContents
+    if (!wc) return
+    const host = hostOf(tab.url)
+    const current = wc.getZoomFactor()
+    const i = ZOOM_STEPS.findIndex((z) => z >= current - 0.001)
+    const next =
+      delta === 0
+        ? 1
+        : ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, Math.max(0, (i < 0 ? 7 : i) + delta))]
+    wc.setZoomFactor(next)
+    if (host) {
+      settings.update((s) => {
+        if (next === 1) delete s.zoom[host]
+        else s.zoom[host] = next
+      })
+    }
+    this.toast(`Zoom ${Math.round(next * 100)}%`)
+  }
+
   private applyZoom(wc: WebContents, url: string): void {
     const factor = settings.get().zoom[hostOf(url)] ?? 1
     if (Math.abs(wc.getZoomFactor() - factor) > 0.001) wc.setZoomFactor(factor)
@@ -1034,7 +1070,7 @@ export class VewWindow {
     const views = this.dragging ? [] : this.visibleTabs().map((t) => this.ensureView(t))
     for (const v of this.shown) if (!views.includes(v)) this.win.contentView.removeChildView(v)
     for (const v of views) this.win.contentView.addChildView(v)
-    if (this.paletteOpen || this.peek || this.findOpen || this.popup) {
+    if (this.paletteOpen || this.peek || this.findOpen || this.popup || this.label) {
       this.win.contentView.addChildView(this.overlay)
     } else this.win.contentView.removeChildView(this.overlay)
     if (this.peek) this.win.contentView.addChildView(this.peek.view)
@@ -1345,6 +1381,7 @@ export class VewWindow {
       const page = this.active()?.view?.webContents
       if (from === 'sidebar' && page) {
         this.focusTarget = 'page'
+        if (this.sidebar.peek) this.run({ type: 'sidebar', peek: false })
         return page.focus()
       }
       this.focusTarget = 'sidebar'
@@ -1359,6 +1396,28 @@ export class VewWindow {
     this.focusTarget = 'sidebar'
     this.win.webContents.focus()
     this.win.webContents.send(IPC.focusUrl)
+  }
+
+  /** Show (or hide) the title pill beside a hovered rail icon, in the overlay shrunk to just the pill. */
+  private railHover(id: number | null, y?: number): void {
+    const tab = id === null ? undefined : this.tabById(id)
+    const busy = this.paletteOpen || this.findOpen || this.peek || this.popup
+    if (!tab || y === undefined || busy || !this.sidebar.collapsed || this.sidebar.peek) {
+      if (!this.label) return
+      this.label = null
+      this.overlay.webContents.send(IPC.label, null)
+      return this.present()
+    }
+    this.label = { id: tab.id, y }
+    const info: RailLabel = {
+      id: tab.id,
+      title: tab.title || tab.url,
+      url: tab.url,
+      favicon: tab.favicon,
+      loading: tab.loading
+    }
+    this.present()
+    this.overlay.webContents.send(IPC.label, info)
   }
 
   private restoreFocus(): void {
@@ -1554,12 +1613,14 @@ export class VewWindow {
     this.overlay.setBounds(
       this.paletteOpen || this.peek || this.popup
         ? { x: 0, y: 0, width, height }
-        : {
-            x: pane.x + pane.width - FIND_BAR.width - 12,
-            y: pane.y + 12,
-            width: FIND_BAR.width,
-            height: FIND_BAR.height
-          }
+        : this.label && !this.findOpen
+          ? { x: RAIL_WIDTH + 2, y: Math.round(this.label.y - 22), width: 320, height: 44 }
+          : {
+              x: pane.x + pane.width - FIND_BAR.width - 12,
+              y: pane.y + 12,
+              width: FIND_BAR.width,
+              height: FIND_BAR.height
+            }
     )
     if (this.peek) {
       this.peek.view.setBounds(peekRect(card))

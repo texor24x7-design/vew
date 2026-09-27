@@ -37,7 +37,9 @@ export const IPC = {
   /** main → extension page / worker: (namespace, event, args[]) */
   crxEvent: 'vew:crx-event',
   /** main → overlay: an extension popup is open (true) or closed (false) */
-  popup: 'vew:popup'
+  popup: 'vew:popup',
+  /** main → overlay: RailLabel for the tab icon hovered in the collapsed rail, or null */
+  label: 'vew:label'
 } as const
 
 /** favorites: icon grid shared across Spaces; pinned: persistent tree with folders; today: auto-archiving. */
@@ -292,6 +294,15 @@ export interface ExtensionInfo {
   path: string
 }
 
+/** The floating pill next to a hovered icon in the collapsed rail. */
+export interface RailLabel {
+  id: number
+  title: string
+  url: string
+  favicon?: string
+  loading: boolean
+}
+
 export interface BrowserState {
   /** Shared by every Space. */
   favorites: TabState[]
@@ -410,6 +421,7 @@ export type Command =
   | { type: 'extensionClick'; id: string; anchor: { x: number; y: number } }
   | { type: 'extensionMenu'; id: string }
   | { type: 'closePopup' }
+  | { type: 'railHover'; id: number | null; y?: number }
   | { type: 'back' }
   | { type: 'forward' }
   | { type: 'reload' }
@@ -502,6 +514,8 @@ const validators: { [K in Command['type']]: (c: Record<string, unknown>) => bool
   extensionClick: (c) => isExtensionId(c.id) && isPoint(c.anchor),
   extensionMenu: (c) => isExtensionId(c.id),
   closePopup: bare,
+  railHover: (c) =>
+    (c.id === null || int(c.id)) && opt(c.y, (v) => typeof v === 'number' && Number.isFinite(v)),
   back: bare,
   forward: bare,
   reload: bare,

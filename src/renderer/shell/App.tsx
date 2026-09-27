@@ -15,6 +15,7 @@ import { icon } from '../shared/ui'
 import { DownloadsButton, DownloadsList, SiteButton, SitePopover } from './Essentials'
 import { ExtensionRow } from './ExtensionRow'
 import { PageArea } from './PageArea'
+import { Rail } from './Rail'
 import { ArchiveList, Tabs, findNode } from './Sidebar'
 import { SpaceEditor, SpaceSwitcher, themeVars, useSpaceSwipe, useSystemDark } from './Spaces'
 
@@ -102,11 +103,6 @@ export default function App(): React.JSX.Element {
           className="drag absolute inset-y-0 left-0 flex flex-col gap-2 px-2"
           style={{ width: sidebar.width }}
           onWheel={onWheel}
-          onMouseLeave={() => {
-            // Keep a peeked sidebar open while the user is typing in it.
-            if (sidebar.peek && document.activeElement?.tagName !== 'INPUT')
-              send({ type: 'sidebar', peek: false })
-          }}
         >
           <NavRow active={active} />
           <UrlPill active={active} collapsed={sidebar.collapsed} site={state.site} />
@@ -181,12 +177,8 @@ export default function App(): React.JSX.Element {
           </div>
         </motion.aside>
         {!sidebar.collapsed && <ResizeHandle width={sidebar.width} />}
-        {hidden && (
-          <div
-            className="no-drag absolute inset-y-0 left-0 w-2"
-            onMouseEnter={() => send({ type: 'sidebar', peek: true })}
-          />
-        )}
+        {/* Collapsed: an icon rail (the full sidebar only slides back for Cmd+L / F6). */}
+        {hidden && <Rail state={state} />}
       </div>
     </MotionConfig>
   )

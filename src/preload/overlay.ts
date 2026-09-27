@@ -1,5 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC, type Command, type FindState, type PaletteData, type PeekInfo } from '../shared/ipc'
+import {
+  IPC,
+  type Command,
+  type FindState,
+  type PaletteData,
+  type PeekInfo,
+  type RailLabel
+} from '../shared/ipc'
 
 const api = {
   send: (cmd: Command): void => ipcRenderer.send(IPC.command, cmd),
@@ -23,6 +30,11 @@ const api = {
     const listener = (_e: unknown, open: boolean): void => cb(open)
     ipcRenderer.on(IPC.popup, listener)
     return () => ipcRenderer.off(IPC.popup, listener)
+  },
+  onLabel: (cb: (label: RailLabel | null) => void): (() => void) => {
+    const listener = (_e: unknown, label: RailLabel | null): void => cb(label)
+    ipcRenderer.on(IPC.label, listener)
+    return () => ipcRenderer.off(IPC.label, listener)
   },
   onClose: (cb: () => void): (() => void) => {
     const listener = (): void => cb()
