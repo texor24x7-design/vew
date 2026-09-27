@@ -1,5 +1,5 @@
 /**
- * Onboarding sound effects, synthesized with Web Audio (no audio files). Quiet by default, and remembered as
+ * Onboarding sound effects and ambient music, synthesized with Web Audio (no audio files). Quiet by default, and remembered as
  * muted per viewer. Every call is best-effort: no audio device, or a blocked AudioContext, just means silence.
  */
 const KEY = 'vew:sound-muted'
@@ -15,6 +15,8 @@ let muted = ((): boolean => {
 export const isMuted = (): boolean => muted
 export function setMuted(value: boolean): void {
   muted = value
+  if (value) music.stop()
+  else music.start()
   try {
     localStorage.setItem(KEY, value ? '1' : '0')
   } catch {
@@ -106,3 +108,121 @@ export const sound = {
     })
   }
 }
+
+/** Hz of a note: semitones from A4. */
+const hz = (semitones: number): number => 440 * 2 ** (semitones / 12)
+/** Slow, dreamy chords (Fmaj7 → Am7 → Cmaj7 → Gsus4), as semitones from A4. */
+const CHORDS = [
+  [-28, -16, -9, -5, 0], // F2 F3 C4 E4 A4
+  [-24, -12, -5, -2, 3], // A2 A3 E4 G4 C5
+  [-33, -21, -9, -2, 2], // C2 C3 C4 G4 B4
+  [-26, -14, -7, -2, 3] // G2 G3 D4 G4 C5
+]
+/** C major pentatonic, high: the occasional bell. */
+const BELLS = [3, 5, 7, 10, 12, 15, 17, 19, 22]
+const CHORD_SECONDS = 9
+
+/** A long, dark reverb tail made from decaying noise. */
+function reverb(a: AudioContext): ConvolverNode {
+  const length = a.sampleRate * 4.5
+  const impulse = a.createBuffer(2, length, a.sampleRate)
+  for (let c = 0; c < 2; c++) {
+    const data = impulse.getChannelData(c)
+    for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length) ** 3
+  }
+  const node = a.createConvolver()
+  node.buffer = impulse
+  return node
+}
+
+/**
+ * Ambient background music: detuned pads drifting through four chords, a bell now and then, all through
+ * a long reverb. Fades in on start and out on stop.
+ */
+export const music = ((): { start: () => void; stop: () => void } => {
+  let master: GainNode | null = null
+  let timers: ReturnType<typeof setTimeout>[] = []
+  let chord = 0
+
+  const pad = (a: AudioContext, out: AudioNode, notes: number[], at: number): void => {
+    const len = CHORD_SECONDS + 4 // overlaps the next chord: a slow crossfade
+    for (const n of notes) {
+      for (const detune of [-6, 6]) {
+        const osc = a.createOscillator()
+        const gain = a.createGain()
+        osc.type = n < -20 ? 'sine' : 'triangle'
+        osc.frequency.value = hz(n)
+        osc.detune.value = detune
+        gain.gain.setValueAtTime(0.0001, at)
+        gain.gain.linearRampToValueAtTime(n < -20 ? 0.05 : 0.018, at + 3.5)
+        gain.gain.linearRampToValueAtTime(0.0001, at + len)
+        osc.connect(gain).connect(out)
+        osc.start(at)
+        osc.stop(at + len + 0.1)
+      }
+    }
+  }
+  /** A soft bell: a pentatonic note and its octave, fading into the reverb. */
+  const bell = (a: AudioContext, out: AudioNode): void => {
+    const t = a.currentTime
+    const f = hz(BELLS[Math.floor(Math.random() * BELLS.length)])
+    for (const [mult, vol] of [
+      [1, 0.03],
+      [2.01, 0.008]
+    ]) {
+      const osc = a.createOscillator()
+      const gain = a.createGain()
+      osc.frequency.value = f * mult
+      gain.gain.setValueAtTime(0.0001, t)
+      gain.gain.exponentialRampToValueAtTime(vol, t + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 3)
+      osc.connect(gain).connect(out)
+      osc.start(t)
+      osc.stop(t + 3.1)
+    }
+  }
+
+  return {
+    start(): void {
+      const a = audio()
+      if (!a || master) return
+      master = a.createGain()
+      master.gain.setValueAtTime(0.0001, a.currentTime)
+      master.gain.exponentialRampToValueAtTime(0.9, a.currentTime + 4)
+      const tone = a.createBiquadFilter()
+      tone.type = 'lowpass'
+      tone.frequency.value = 2200
+      const wet = a.createGain()
+      wet.gain.value = 0.55
+      const verb = reverb(a)
+      tone.connect(master)
+      tone.connect(verb).connect(wet).connect(master)
+      master.connect(a.destination)
+      const next = (): void => {
+        const ac = ctx
+        if (!ac || !master) return
+        pad(ac, tone, CHORDS[chord % CHORDS.length], ac.currentTime + 0.05)
+        chord++
+        timers.push(setTimeout(next, CHORD_SECONDS * 1000))
+      }
+      const bells = (): void => {
+        if (!ctx || !master) return
+        bell(ctx, tone)
+        timers.push(setTimeout(bells, 2200 + Math.random() * 3800))
+      }
+      next()
+      timers.push(setTimeout(bells, 2500))
+    },
+    stop(): void {
+      const m = master
+      master = null
+      timers.forEach(clearTimeout)
+      timers = []
+      if (!m || !ctx) return
+      m.gain.cancelScheduledValues(ctx.currentTime)
+      m.gain.setValueAtTime(m.gain.value, ctx.currentTime)
+      m.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 1.5)
+      setTimeout(() => m.disconnect(), 1600)
+    }
+  }
+})()

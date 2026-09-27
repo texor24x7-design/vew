@@ -1,9 +1,19 @@
-import { motion } from 'motion/react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import accountsIcon from '../../../resources/texor/accounts.svg'
 import finvoiceIcon from '../../../resources/texor/finvoice.svg'
 import notesIcon from '../../../resources/texor/notes.svg'
 import talkIcon from '../../../resources/texor/talk.svg'
 import wordmark from '../../../resources/texor/texor-wordmark.svg?raw'
+import cloudsPoster from '../../../resources/onboarding/clouds.jpg'
+import cloudsVideo from '../../../resources/onboarding/clouds.mp4'
+import forestPoster from '../../../resources/onboarding/forest.jpg'
+import forestVideo from '../../../resources/onboarding/forest.mp4'
+import oceanPoster from '../../../resources/onboarding/ocean.jpg'
+import oceanVideo from '../../../resources/onboarding/ocean.mp4'
+import waterfallPoster from '../../../resources/onboarding/waterfall.jpg'
+import waterfallVideo from '../../../resources/onboarding/waterfall.mp4'
+import wavesPoster from '../../../resources/onboarding/waves.jpg'
+import wavesVideo from '../../../resources/onboarding/waves.mp4'
 import vewMark from '../../../resources/vew-mark.svg'
 import type { Account } from '../../shared/ipc'
 
@@ -48,29 +58,61 @@ function Tile(props: { src: string; size: number; label?: string }): React.JSX.E
   )
 }
 
-/** The stage behind every scene: soft blobs in the Space's theme colors, drifting. */
-export function Stage(props: { colors: string[]; children: React.ReactNode }): React.JSX.Element {
-  const [a, b, c = props.colors[0]] = props.colors
-  const blob = (color: string, x: string[], y: string[], d: number): React.JSX.Element => (
-    <motion.div
-      className="absolute size-[70%] rounded-full opacity-80 blur-3xl"
-      animate={{ x, y, backgroundColor: color }}
-      transition={{
-        x: { duration: d, ...loop, repeatType: 'mirror' },
-        y: { duration: d * 1.3, ...loop, repeatType: 'mirror' },
-        backgroundColor: { duration: 0.6 }
-      }}
-    />
-  )
+/** Nature footage behind each step (see resources/onboarding/CREDITS.md). */
+export const CLIPS = [
+  { video: oceanVideo, poster: oceanPoster, credit: 'Nature video, HD – 4K · CC BY 3.0' },
+  { video: wavesVideo, poster: wavesPoster, credit: 'Mostafameraji · CC0' },
+  { video: forestVideo, poster: forestPoster, credit: 'Flykit production · CC BY 3.0' },
+  { video: waterfallVideo, poster: waterfallPoster, credit: 'US Forest Service · Public domain' },
+  { video: cloudsVideo, poster: cloudsPoster, credit: 'BLM Oregon & Washington · Public domain' }
+]
+export type Clip = (typeof CLIPS)[number]
+
+/**
+ * The stage behind every scene: looping nature footage with a slow push-in, crossfading between steps,
+ * tinted by the Space's theme colors. Reduced motion shows the still frame instead.
+ */
+export function Stage(props: {
+  colors: string[]
+  clip: Clip
+  children: React.ReactNode
+}): React.JSX.Element {
+  const reduced = useReducedMotion()
+  const { clip } = props
   return (
-    <div className="relative isolate h-full min-h-[320px] overflow-hidden rounded-[28px] bg-neutral-100 dark:bg-neutral-800">
-      <div className="absolute inset-0">
-        {blob(a, ['-20%', '10%'], ['-20%', '5%'], 9)}
-        {blob(b, ['60%', '35%'], ['50%', '20%'], 11)}
-        {blob(c, ['20%', '50%'], ['70%', '40%'], 13)}
-      </div>
-      <div className="absolute inset-0 bg-white/25 dark:bg-black/20" />
+    <div className="relative isolate h-full min-h-[320px] overflow-hidden rounded-[28px] bg-neutral-900">
+      <AnimatePresence initial={false}>
+        <motion.div
+          key={clip.video}
+          className="absolute inset-0"
+          initial={{ opacity: 0, scale: 1.08 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ opacity: { duration: 1.2 }, scale: { duration: 10, ease: 'easeOut' } }}
+        >
+          {reduced ? (
+            <img src={clip.poster} alt="" className="size-full object-cover" />
+          ) : (
+            <video
+              src={clip.video}
+              poster={clip.poster}
+              autoPlay
+              muted
+              loop
+              playsInline
+              className="size-full object-cover"
+            />
+          )}
+        </motion.div>
+      </AnimatePresence>
+      <motion.div
+        className="absolute inset-0 opacity-60 mix-blend-soft-light"
+        animate={{ background: `linear-gradient(135deg, ${props.colors.join(', ')})` }}
+        transition={{ duration: 0.6 }}
+      />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/35 via-transparent to-black/10" />
       <div className="relative grid h-full place-items-center p-8">{props.children}</div>
+      <p className="absolute bottom-3 left-4 text-[11px] text-white/80">{clip.credit}</p>
     </div>
   )
 }

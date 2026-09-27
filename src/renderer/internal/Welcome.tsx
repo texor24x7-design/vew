@@ -5,6 +5,7 @@ import type { Account, SettingsView, WelcomeState } from '../../shared/ipc'
 import { PRESETS } from '../../shared/theme'
 import { button, call, muted } from './api'
 import {
+  CLIPS,
   DefaultScene,
   DoneScene,
   FamilyScene,
@@ -13,7 +14,7 @@ import {
   Stage,
   ThemeScene
 } from './Scenes'
-import { isMuted, setMuted, sound } from './sound'
+import { isMuted, music, setMuted, sound } from './sound'
 
 const isMac = navigator.userAgent.includes('Mac')
 const MOD = isMac ? '⌘' : 'Ctrl+'
@@ -39,6 +40,11 @@ export function WelcomePage(): React.JSX.Element {
   const [quiet, setQuiet] = useState(isMuted())
   useEffect(() => {
     void call<WelcomeState>({ method: 'welcomeState' }).then(setState)
+  }, [])
+  // Soft ambient music while onboarding (fades in; the speaker button mutes it with the other sounds).
+  useEffect(() => {
+    music.start()
+    return () => music.stop()
   }, [])
   const last = STEPS.length - 1
   const go = (to: number): void => {
@@ -160,6 +166,7 @@ export function WelcomePage(): React.JSX.Element {
                         className={primary}
                         onClick={() => {
                           sound.tap()
+                          music.stop()
                           void call({ method: 'welcomeDone' })
                         }}
                       >
@@ -196,7 +203,7 @@ export function WelcomePage(): React.JSX.Element {
         </div>
 
         <div className="order-first h-[42vh] lg:order-none lg:h-auto" aria-hidden>
-          <Stage colors={colors}>
+          <Stage colors={colors} clip={CLIPS[step]}>
             <AnimatePresence mode="wait" initial={false}>
               <motion.div
                 key={step}

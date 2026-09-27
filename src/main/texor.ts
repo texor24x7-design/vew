@@ -204,10 +204,7 @@ const refreshToken = (a: Stored): string | null => {
 export async function signOut(profileId: string): Promise<void> {
   const a = all()[profileId]
   if (!a) return
-  delete all()[profileId]
-  persist()
-  const token = refreshToken(a)
-  if (token) await post('/token/revocation', { token }).catch(() => {})
+  // Cookies first, so by the time the UI shows "signed out" the Texor apps are signed out too.
   const cookies = sessionFor(profileId).cookies
   // accounts.texor.app → the Texor-wide texor.app cookies (SSO), which every Texor app shares.
   const domain = new URL(ACCOUNTS).hostname.replace(/^accounts\./, '')
@@ -216,6 +213,11 @@ export async function signOut(profileId: string): Promise<void> {
     const scheme = c.secure ? 'https' : 'http' // cookies are bound to the scheme that set them
     await cookies.remove(`${scheme}://${host}${c.path ?? '/'}`, c.name).catch(() => {})
   }
+  delete all()[profileId]
+  persist()
+  // Best effort, in the background: offline, the token just expires on its own.
+  const token = refreshToken(a)
+  if (token) void post('/token/revocation', { token }).catch(() => {})
 }
 
 /** On launch: pick up name and picture changes, and drop accounts whose sign-in was revoked. */

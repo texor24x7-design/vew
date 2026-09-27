@@ -26,7 +26,10 @@ export const isInternalUrl = (url: string): boolean => url.startsWith('vew://')
 /** Must run before the app is ready. */
 export function registerInternalScheme(): void {
   protocol.registerSchemesAsPrivileged([
-    { scheme: 'vew', privileges: { standard: true, secure: true, supportFetchAPI: true } }
+    {
+      scheme: 'vew',
+      privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+    }
   ])
 }
 
@@ -66,10 +69,14 @@ export function serveInternalPages(hooks: InternalHooks): void {
     const dev = !app.isPackaged && process.env['ELECTRON_RENDERER_URL']
     // Development: the Vite dev server, keeping the query (Vite's module versions).
     if (dev) {
-      // Only Accept matters to Vite (e.g. CSS imported from code vs. a stylesheet); other headers here
-      // belong to the vew: request and would make the forwarded fetch fail.
-      const accept = req.headers.get('accept')
-      return net.fetch(`${dev}${path}${search}`, accept ? { headers: { accept } } : undefined)
+      // Only Accept (CSS imported from code vs. a stylesheet) and Range (video) matter to Vite; other headers
+      // here belong to the vew: request and would make the forwarded fetch fail.
+      const headers: Record<string, string> = {}
+      for (const name of ['accept', 'range']) {
+        const value = req.headers.get(name)
+        if (value) headers[name] = value
+      }
+      return net.fetch(`${dev}${path}${search}`, { headers })
     }
     const file = normalize(join(root, path))
     if (!file.startsWith(root)) return new Response('Not found', { status: 404 }) // no ../ escapes
