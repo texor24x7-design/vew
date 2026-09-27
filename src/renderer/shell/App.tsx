@@ -12,7 +12,13 @@ import {
 import { DEFAULT_THEME, palette } from '../../shared/theme'
 import { displayHost } from '../../shared/url'
 import { icon } from '../shared/ui'
-import { DownloadsButton, DownloadsList, SiteButton, SitePopover } from './Essentials'
+import {
+  AccountButton,
+  DownloadsButton,
+  DownloadsList,
+  SiteButton,
+  SitePopover
+} from './Essentials'
 import { ExtensionRow } from './ExtensionRow'
 import { PageArea } from './PageArea'
 import { Rail } from './Rail'
@@ -141,6 +147,7 @@ export default function App(): React.JSX.Element {
           <Toast />
           <div className="flex h-10 shrink-0 items-center justify-between">
             <div className="flex">
+              <AccountButton account={state.account} className={iconButton} />
               <button
                 className={`${iconButton} ${panel === 'archive' ? 'bg-(--fill)' : ''}`}
                 aria-label={panel === 'archive' ? 'Back to tabs' : 'Show archive'}

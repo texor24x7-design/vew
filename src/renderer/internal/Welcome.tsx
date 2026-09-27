@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import type { SettingsView, WelcomeState } from '../../shared/ipc'
+import texorIcon from '../../../resources/texor/accounts.png'
+import type { Account, SettingsView, WelcomeState } from '../../shared/ipc'
 import { PRESETS } from '../../shared/theme'
 import { button, call, muted } from './api'
 
@@ -7,9 +8,9 @@ const isMac = navigator.userAgent.includes('Mac')
 const MOD = isMac ? '⌘' : 'Ctrl+'
 const primary =
   'h-9 rounded-lg bg-neutral-900 px-4 text-[14px] text-white hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200'
-const STEPS = ['Theme', 'Import', 'Default browser', 'Done'] as const
+const STEPS = ['Account', 'Theme', 'Import', 'Default browser', 'Done'] as const
 
-/** First run: pick a look, bring bookmarks and history, make Vew the default. Every step can be skipped. */
+/** First run: sign in with Texor, pick a look, bring bookmarks and history, make Vew the default. Every step can be skipped. */
 export function WelcomePage(): React.JSX.Element {
   const [step, setStep] = useState(0)
   const [state, setState] = useState<WelcomeState | null>(null)
@@ -31,10 +32,14 @@ export function WelcomePage(): React.JSX.Element {
         ))}
       </ol>
       {step === 0 && (
-        <Step
-          title="Welcome to Vew"
-          lead="Pick a look for your first Space. You can change it any time."
-        >
+        <SignInStep
+          account={state?.account ?? null}
+          onAccount={(account) => setState(state && { ...state, account })}
+          onNext={next}
+        />
+      )}
+      {step === 1 && (
+        <Step title="Pick a look" lead="A theme for your first Space. You can change it any time.">
           <div className="grid grid-cols-4 gap-3" role="radiogroup" aria-label="Theme">
             {PRESETS.map((p) => {
               const selected = state?.colors.join() === p.colors.join()
@@ -57,8 +62,8 @@ export function WelcomePage(): React.JSX.Element {
           <Actions onNext={next} />
         </Step>
       )}
-      {step === 1 && <ImportStep state={state} onNext={next} />}
-      {step === 2 && (
+      {step === 2 && <ImportStep state={state} onNext={next} />}
+      {step === 3 && (
         <Step
           title="Make Vew your default browser"
           lead="Links from other apps will open in a small Vew window."
@@ -66,7 +71,7 @@ export function WelcomePage(): React.JSX.Element {
           <DefaultBrowser initial={state?.isDefaultBrowser ?? false} onNext={next} />
         </Step>
       )}
-      {step === 3 && (
+      {step === 4 && (
         <Step title="You’re all set" lead="A few keys worth knowing:">
           <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-[14px]">
             {[
@@ -121,6 +126,54 @@ function Actions(props: { onNext: () => void; label?: string; skip?: boolean }):
         </button>
       )}
     </div>
+  )
+}
+
+/** Texor Account first, like a Google Account in Chrome. Optional: Vew works fully without one. */
+function SignInStep(props: {
+  account: Account | null
+  onAccount: (a: Account | null) => void
+  onNext: () => void
+}): React.JSX.Element {
+  const [busy, setBusy] = useState(false)
+  const { account } = props
+  return (
+    <section aria-labelledby="step-title">
+      <img src={texorIcon} alt="" className="mb-6 size-14 rounded-2xl" />
+      <h1 id="step-title" className="mb-2 text-3xl font-semibold">
+        {account ? `Welcome, ${account.name.split(' ')[0]}` : 'Welcome to Vew'}
+      </h1>
+      <p className={`mb-8 text-[15px] ${muted}`}>
+        {account
+          ? `Signed in as ${account.email}. Finvoice, Talk and Notes are signed in too.`
+          : 'Sign in with your Texor Account to use Finvoice, Talk and Notes without signing in again.'}
+      </p>
+      {account ? (
+        <Actions onNext={props.onNext} />
+      ) : (
+        <div className="mt-8 flex gap-2">
+          <button
+            autoFocus
+            className={primary}
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true)
+              try {
+                const a = await call<Account | null>({ method: 'texorSignIn' })
+                props.onAccount(a)
+              } finally {
+                setBusy(false)
+              }
+            }}
+          >
+            {busy ? 'Waiting for sign-in…' : 'Sign in with Texor'}
+          </button>
+          <button className={button} onClick={props.onNext}>
+            Not now
+          </button>
+        </div>
+      )}
+    </section>
   )
 }
 

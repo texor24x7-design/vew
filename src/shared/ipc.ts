@@ -97,6 +97,14 @@ export interface Profile {
   name: string
 }
 
+/** The Texor Account a profile is signed in to Vew with. */
+export interface Account {
+  name: string
+  email: string
+  /** data: URL */
+  picture?: string
+}
+
 export type Edge = 'left' | 'right' | 'top' | 'bottom'
 
 export interface SplitState {
@@ -202,6 +210,8 @@ export type InternalRequest =
   | { method: 'setColors'; colors: string[] }
   | { method: 'import'; source: string; bookmarks: boolean; history: boolean }
   | { method: 'welcomeDone' }
+  | { method: 'texorSignIn' }
+  | { method: 'texorSignOut' }
 
 /** Another browser on this computer we can import from. */
 export interface ImportSource {
@@ -215,11 +225,13 @@ export interface WelcomeState {
   sources: ImportSource[]
   colors: string[]
   isDefaultBrowser: boolean
+  account: Account | null
 }
 
 export interface SettingsView {
   settings: Settings
   isDefaultBrowser: boolean
+  account: Account | null
 }
 
 export function isInternalRequest(x: unknown): x is InternalRequest {
@@ -245,6 +257,8 @@ export function isInternalRequest(x: unknown): x is InternalRequest {
       return true
     case 'welcomeState':
     case 'welcomeDone':
+    case 'texorSignIn':
+    case 'texorSignOut':
       return true
     case 'setColors':
       return (
@@ -324,6 +338,8 @@ export interface BrowserState {
   downloads: DownloadState[]
   site: SiteInfo | null
   extensions: ExtensionState[]
+  /** The active Space's profile's Texor Account. */
+  account: Account | null
 }
 
 /** A tab as the command bar sees it (from any Space). */
@@ -422,6 +438,7 @@ export type Command =
   | { type: 'extensionMenu'; id: string }
   | { type: 'closePopup' }
   | { type: 'railHover'; id: number | null; y?: number }
+  | { type: 'accountMenu' }
   | { type: 'back' }
   | { type: 'forward' }
   | { type: 'reload' }
@@ -516,6 +533,7 @@ const validators: { [K in Command['type']]: (c: Record<string, unknown>) => bool
   closePopup: bare,
   railHover: (c) =>
     (c.id === null || int(c.id)) && opt(c.y, (v) => typeof v === 'number' && Number.isFinite(v)),
+  accountMenu: bare,
   back: bare,
   forward: bare,
   reload: bare,
@@ -547,5 +565,6 @@ export const EMPTY_STATE: BrowserState = {
   split: null,
   downloads: [],
   site: null,
-  extensions: []
+  extensions: [],
+  account: null
 }

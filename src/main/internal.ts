@@ -4,6 +4,7 @@ import { app, BrowserWindow, dialog, ipcMain, net, protocol, session } from 'ele
 import {
   IPC,
   isInternalRequest,
+  type Account,
   type InternalRequest,
   type SettingsView,
   type WelcomeState
@@ -41,6 +42,10 @@ export interface InternalHooks {
   setColors: (colors: string[]) => void
   importBookmarks: (folder: ImportedFolder) => number
   finishWelcome: () => void
+  /** The active Space's Texor Account, signing in / out of it. */
+  account: () => Account | null
+  signIn: () => Promise<Account | null>
+  signOut: () => Promise<void>
 }
 
 export function serveInternalPages(hooks: InternalHooks): void {
@@ -104,22 +109,23 @@ async function handle(req: InternalRequest, hooks: InternalHooks): Promise<unkno
       return response === 0
     }
     case 'getSettings':
-      return settingsView()
+      return settingsView(hooks)
     case 'setSettings':
       settings.update((s) => Object.assign(s, req.patch))
-      return settingsView()
+      return settingsView(hooks)
     case 'makeDefaultBrowser':
       // ponytail: in development this registers the Electron binary; packaged builds register Vew (Phase 9).
       app.setAsDefaultProtocolClient('http')
       app.setAsDefaultProtocolClient('https')
-      return settingsView()
+      return settingsView(hooks)
     case 'open':
       return hooks.openUrl(req.url)
     case 'welcomeState':
       return {
         sources: detectSources(),
         colors: hooks.colors(),
-        isDefaultBrowser: app.isDefaultProtocolClient('https')
+        isDefaultBrowser: app.isDefaultProtocolClient('https'),
+        account: hooks.account()
       } satisfies WelcomeState
     case 'setColors':
       return hooks.setColors(req.colors)
@@ -133,6 +139,11 @@ async function handle(req: InternalRequest, hooks: InternalHooks): Promise<unkno
     }
     case 'welcomeDone':
       return hooks.finishWelcome()
+    case 'texorSignIn':
+      return hooks.signIn()
+    case 'texorSignOut':
+      await hooks.signOut()
+      return hooks.account()
     case 'extList':
       return listExtensions()
     case 'extInstall':
@@ -144,7 +155,8 @@ async function handle(req: InternalRequest, hooks: InternalHooks): Promise<unkno
   }
 }
 
-const settingsView = (): SettingsView => ({
+const settingsView = (hooks: InternalHooks): SettingsView => ({
   settings: settings.get(),
-  isDefaultBrowser: app.isDefaultProtocolClient('https')
+  isDefaultBrowser: app.isDefaultProtocolClient('https'),
+  account: hooks.account()
 })

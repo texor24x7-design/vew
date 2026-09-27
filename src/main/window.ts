@@ -6,6 +6,7 @@ import {
   dialog,
   ipcMain,
   Menu,
+  nativeImage,
   nativeTheme,
   net,
   session,
@@ -20,6 +21,7 @@ import {
 import {
   IPC,
   isCommand,
+  type Account,
   type ArchivedTab,
   type BrowserState,
   type Command,
@@ -48,7 +50,7 @@ import {
   type Rect
 } from '../shared/layout'
 import { PRESETS } from '../shared/theme'
-import { toUrl, type SearchEngine } from '../shared/url'
+import { TEXOR_APPS, toUrl, type SearchEngine } from '../shared/url'
 import { blockedOn, blockerEvents, resetBlocked } from './adblock'
 import { tabsToDiscard } from './discard'
 import type { ImportedBookmark, ImportedFolder } from './importer'
@@ -69,6 +71,16 @@ import { originOf } from './permissions'
 import { settings } from './settings'
 import { sessionFor } from './profiles'
 import { shortcutFor } from './shortcuts'
+import {
+  MANAGE_URL,
+  accountFor,
+  beginSignIn,
+  cancelSignIn,
+  finishSignIn,
+  isSignInRedirect,
+  signOut,
+  texorEvents
+} from './texor'
 import { ARCHIVE_LIMIT, emptySaved, fromLive, load as loadSaved, save, toLive } from './store'
 import {
   locate,
@@ -108,6 +120,11 @@ const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.
 const FIND_BAR = { width: 340, height: 48 }
 const REOPEN_LIMIT = 25
 const ARCHIVE_CHECK_MS = 60_000
+/** Official Texor app icons, for the account menu. */
+const texorIcon = (id: string): Electron.NativeImage =>
+  nativeImage
+    .createFromPath(join(__dirname, `../../resources/texor/${id}.png`))
+    .resize({ width: 16, height: 16, quality: 'best' })
 const SIDEBAR_ANIM_MS = 180
 const isMac = process.platform === 'darwin'
 /** Default icons for new Spaces, so they're distinguishable in the switcher before being customized. */
@@ -233,6 +250,8 @@ export class VewWindow {
   private renameId: number | null = null
   private editSpaceId: number | null = null
   private closedUrls: string[] = []
+  /** Tabs showing a Texor sign-in, by tab id → its sign-in state. */
+  private signingIn = new Map<number, string>()
   private disposed = false
   private saveTimer?: NodeJS.Timeout
   private tween?: NodeJS.Timeout
@@ -296,11 +315,14 @@ export class VewWindow {
     const onBlocked = (id: number): void => {
       if (this.active()?.view?.webContents.id === id) this.schedulePush()
     }
+    const onAccount = (): void => this.push()
+    texorEvents.on('change', onAccount)
     downloads.on('change', onDownloads)
     downloads.on('done', onDownloaded)
     blockerEvents.on('blocked', onBlocked)
     this.win.on('closed', () => {
       unsubscribe()
+      texorEvents.off('change', onAccount)
       downloads.off('change', onDownloads)
       downloads.off('done', onDownloaded)
       blockerEvents.off('blocked', onBlocked)
@@ -439,6 +461,88 @@ export class VewWindow {
     this.openPalette()
   }
 
+  /** The active Space's Texor Account. */
+  get account(): Account | null {
+    return accountFor(this.space.profileId)
+  }
+
+  /**
+   * Sign the active Space's profile in to Texor, in a tab of its own (so the Texor apps share the session).
+   * Resolves with the account, or null if the tab was closed first. Afterwards the previous tab comes back.
+   */
+  async signIn(): Promise<Account | null> {
+    if (this.account) return this.account
+    const busy = [...this.signingIn.keys()].find((id) => this.find(id)?.space === this.space)
+    if (busy !== undefined) {
+      this.activate(busy)
+      return null
+    }
+    const back = this.activeId
+    const { url, state, done } = beginSignIn(this.space.profileId)
+    const tab = this.openTab(url, { activate: true, title: 'Sign in with Texor' })
+    this.signingIn.set(tab.id, state)
+    const account = await done
+    if (back !== null && this.find(back)) this.activate(back)
+    if (account) this.toast(`Signed in as ${account.email || account.name}`)
+    return account
+  }
+
+  async signOut(): Promise<void> {
+    const account = this.account
+    if (!account) return
+    const { response } = await dialog.showMessageBox(this.win, {
+      type: 'question',
+      message: `Sign out of ${account.email || account.name}?`,
+      detail: 'You’ll also be signed out of Texor apps in this profile.',
+      buttons: ['Sign Out', 'Cancel'],
+      defaultId: 0,
+      cancelId: 1
+    })
+    if (response !== 0) return
+    await signOut(this.space.profileId)
+    // Open Texor pages reload signed out.
+    for (const t of this.allTabs()) {
+      if (t.profileId === this.space.profileId && /^https:\/\/([^/]+\.)?texor\.app\//.test(t.url)) {
+        t.view?.webContents.reload()
+      }
+    }
+    this.toast('Signed out')
+  }
+
+  private accountMenu(): void {
+    const account = this.account
+    const open = (url: string) => () => {
+      const existing = tabsInOrder(this.zones).find((t) => t.url.startsWith(url))
+      if (existing) this.activate(existing.id)
+      else this.openTab(url, { activate: true })
+    }
+    const items: MenuItemConstructorOptions[] = [
+      ...(account
+        ? [
+            { label: account.name, sublabel: account.email, enabled: false },
+            {
+              label: 'Manage your Texor Account',
+              icon: texorIcon('accounts'),
+              click: open(MANAGE_URL)
+            }
+          ]
+        : [
+            { label: 'Not signed in', enabled: false },
+            {
+              label: 'Sign in with Texor…',
+              icon: texorIcon('accounts'),
+              click: () => void this.signIn()
+            }
+          ]),
+      { type: 'separator' },
+      ...TEXOR_APPS.map((a) => ({ label: a.name, icon: texorIcon(a.id), click: open(a.url) })),
+      ...(account
+        ? [{ type: 'separator' as const }, { label: 'Sign Out…', click: () => void this.signOut() }]
+        : [])
+    ]
+    Menu.buildFromTemplate(items).popup({ window: this.win })
+  }
+
   /** Profile new pages should use: the active Space's. */
   get profileId(): string {
     return this.space.profileId
@@ -572,6 +676,8 @@ export class VewWindow {
         return void this.deleteSpace(cmd.id)
       case 'spaceMenu':
         return this.spaceMenu(cmd.id)
+      case 'accountMenu':
+        return this.accountMenu()
       case 'openPalette':
         // The overlay owns open/closed (it may be mid-animation), so it decides whether this toggles it shut.
         return this.openPalette()
@@ -838,7 +944,17 @@ export class VewWindow {
       e.preventDefault()
       if (/^https?:/.test(e.url)) this.openTab(e.url, { activate: true })
     }
+    // Texor sign-in finishing: take the code before the request goes out, and close the sign-in tab.
+    const signedIn = (e: Electron.Event<{ url: string; isMainFrame: boolean }>): void => {
+      if (!e.isMainFrame || !isSignInRedirect(e.url)) return
+      e.preventDefault()
+      // Takes the pending sign-in synchronously, so closing the tab below doesn't cancel it.
+      void finishSignIn(e.url).then((a) => a || this.toast('Couldn’t sign in to Texor'))
+      this.closeTab(tab.id)
+    }
     if (kind === 'web') {
+      wc.on('will-navigate', signedIn)
+      wc.on('will-redirect', signedIn)
       watchTab(wc)
       wc.on('context-menu', (_e, params) => this.pageMenu(tab, wc, params))
     }
@@ -1130,9 +1246,14 @@ export class VewWindow {
     if (found?.loc.node.kind !== 'tab') return
     const { loc, space } = found
     const tab = found.loc.node
+    const signIn = this.signingIn.get(id)
+    if (signIn !== undefined) {
+      this.signingIn.delete(id)
+      cancelSignIn(signIn)
+    }
     if (loc.zone === 'today') {
       loc.list.splice(loc.index, 1)
-      this.closedUrls.push(tab.url)
+      if (signIn === undefined) this.closedUrls.push(tab.url)
       if (this.closedUrls.length > REOPEN_LIMIT) this.closedUrls.shift()
     }
     tab.lastActive = Date.now()
@@ -1697,7 +1818,8 @@ export class VewWindow {
       extensions: extensionStates(
         sessionFor(this.space.profileId),
         this.active()?.view?.webContents.id
-      )
+      ),
+      account: this.account
     }
     this.win.webContents.send(IPC.state, state)
     clearTimeout(this.saveTimer)

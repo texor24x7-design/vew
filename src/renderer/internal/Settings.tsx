@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Puzzle } from 'lucide-react'
-import type { ExtensionInfo, InternalRequest, SettingsView } from '../../shared/ipc'
+import texorIcon from '../../../resources/texor/accounts.png'
+import type { Account, ExtensionInfo, InternalRequest, SettingsView } from '../../shared/ipc'
 import { button, call, muted } from './api'
 
 type Patch = Extract<InternalRequest, { method: 'setSettings' }>['patch']
@@ -36,6 +37,40 @@ function Row(props: {
   )
 }
 
+function AccountRow(props: {
+  account: Account | null
+  onChange: (a: Account | null) => void
+}): React.JSX.Element {
+  const { account } = props
+  return (
+    <div className="flex min-h-16 items-center gap-3 py-3">
+      <img
+        src={account?.picture ?? texorIcon}
+        alt=""
+        className={`size-9 object-cover ${account?.picture ? 'rounded-full' : 'rounded-lg'}`}
+      />
+      <div className="min-w-0 flex-1">
+        <div className="truncate">{account ? account.name : 'Not signed in'}</div>
+        <div className={`truncate text-[12px] ${muted}`}>
+          {account
+            ? account.email
+            : 'Sign in to use Finvoice, Talk and Notes in this profile without signing in again.'}
+        </div>
+      </div>
+      <button
+        className={button}
+        onClick={async () =>
+          props.onChange(
+            await call<Account | null>({ method: account ? 'texorSignOut' : 'texorSignIn' })
+          )
+        }
+      >
+        {account ? 'Sign out' : 'Sign in'}
+      </button>
+    </div>
+  )
+}
+
 function Section(props: { title: string; children: React.ReactNode }): React.JSX.Element {
   return (
     <section className="mb-8">
@@ -62,6 +97,9 @@ export function SettingsPage(): React.JSX.Element {
   return (
     <main className="mx-auto max-w-2xl px-6 py-10">
       <h1 className="mb-8 text-2xl font-semibold">Settings</h1>
+      <Section title="Texor Account">
+        <AccountRow account={view.account} onChange={(account) => setView({ ...view, account })} />
+      </Section>
       <Section title="General">
         <Row label="Search engine" hint="Used by the command bar and the address field.">
           <select

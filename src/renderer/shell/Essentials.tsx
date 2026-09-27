@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
-import { Download, FolderOpen, Info, Lock, X } from 'lucide-react'
-import type { DownloadState, PermissionKind, SiteInfo } from '../../shared/ipc'
+import { CircleUserRound, Download, FolderOpen, Info, Lock, X } from 'lucide-react'
+import type { Account, DownloadState, PermissionKind, SiteInfo } from '../../shared/ipc'
 import { icon } from '../shared/ui'
 
 const { send } = window.vew
@@ -11,6 +11,32 @@ const PERMISSIONS: { kind: PermissionKind; label: string }[] = [
   { kind: 'geolocation', label: 'Location' },
   { kind: 'notifications', label: 'Notifications' }
 ]
+
+/** The Texor Account avatar; opens the account menu (Texor apps, manage, sign in / out). */
+export function AccountButton(props: {
+  account: Account | null
+  className: string
+}): React.JSX.Element {
+  const { account } = props
+  return (
+    <button
+      className={props.className}
+      aria-label={account ? `Texor Account: ${account.name}` : 'Sign in with Texor'}
+      title={account ? `${account.name}\n${account.email}` : 'Sign in with Texor'}
+      onClick={() => send({ type: 'accountMenu' })}
+    >
+      {account?.picture ? (
+        <img src={account.picture} alt="" className="size-5 rounded-full object-cover" />
+      ) : account ? (
+        <span className="grid size-5 place-items-center rounded-full bg-(--fill) text-[11px] font-semibold">
+          {account.name.charAt(0).toUpperCase()}
+        </span>
+      ) : (
+        <CircleUserRound {...icon} />
+      )}
+    </button>
+  )
+}
 
 /** Lock (https) or info (http) icon inside the address field. */
 export function SiteButton(props: {

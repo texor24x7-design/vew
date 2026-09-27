@@ -4,6 +4,7 @@ import { registerInternalScheme, serveInternalPages } from './internal'
 import { installMenu } from './menu'
 import { MiniWindow } from './mini'
 import { settings } from './settings'
+import { refreshAccounts } from './texor'
 import { VewWindow } from './window'
 
 registerInternalScheme()
@@ -67,9 +68,13 @@ if (!app.requestSingleInstanceLock()) {
       colors: () => mainWindow().spaceColors(),
       setColors: (colors) => mainWindow().setSpaceColors(colors),
       importBookmarks: (folder) => mainWindow().importBookmarks(folder),
-      finishWelcome: () => mainWindow().finishWelcome()
+      finishWelcome: () => mainWindow().finishWelcome(),
+      account: () => mainWindow().account,
+      signIn: () => mainWindow().signIn(),
+      signOut: () => mainWindow().signOut()
     })
     void loadBlocker()
+    void refreshAccounts()
     installMenu(
       (cmd) => mainWindow().run(cmd),
       (w) => main !== null && w === main.win

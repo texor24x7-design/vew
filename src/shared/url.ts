@@ -37,3 +37,10 @@ export function displayHost(url: string): string {
     return url
   }
 }
+
+/** The Texor apps Vew is built around (see src/main/texor.ts), with their site icons. */
+export const TEXOR_APPS = [
+  { id: 'finvoice', name: 'Finvoice', url: 'https://finvoice.texor.app/', icon: 'icon.png' },
+  { id: 'talk', name: 'Talk', url: 'https://talk.texor.app/', icon: 'icon.svg' },
+  { id: 'notes', name: 'Notes', url: 'https://notes.texor.app/', icon: 'icon.svg' }
+] as const

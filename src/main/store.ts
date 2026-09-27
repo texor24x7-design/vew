@@ -8,6 +8,7 @@ import {
   type SplitDirection
 } from '../shared/layout'
 import { DEFAULT_THEME, isTheme, type Theme } from '../shared/theme'
+import { TEXOR_APPS } from '../shared/url'
 import type { Node, Space, Split } from './tree'
 
 interface SavedTab {
@@ -70,8 +71,17 @@ export const newSavedSpace = (overrides: Partial<SavedSpace> = {}): SavedSpace =
   ...overrides
 })
 
+/** Favorites on a fresh install: the Texor apps (their icons load from the sites). */
+const TEXOR_FAVORITES: SavedNode[] = TEXOR_APPS.map((a) => ({
+  kind: 'tab',
+  title: a.name,
+  url: a.url,
+  favicon: a.url + a.icon,
+  lastActive: 0
+}))
+
 export const emptySaved = (): Saved => ({
-  favorites: [],
+  favorites: TEXOR_FAVORITES.map((f) => ({ ...f })),
   spaces: [newSavedSpace()],
   activeSpace: 0,
   profiles: [DEFAULT_PROFILE],

@@ -1,6 +1,7 @@
 import { PanelLeft, Plus } from 'lucide-react'
 import type { BrowserState, NodeState, TabState } from '../../shared/ipc'
 import { Favicon, icon } from '../shared/ui'
+import { AccountButton } from './Essentials'
 
 const { send } = window.vew
 
@@ -80,6 +81,10 @@ export function Rail({ state }: { state: BrowserState }): React.JSX.Element {
           </div>
         ))}
       </div>
+      <AccountButton
+        account={state.account}
+        className="grid size-8 shrink-0 place-items-center rounded-lg text-(--muted) hover:bg-(--hover)"
+      />
     </nav>
   )
 }

@@ -137,6 +137,7 @@ test('a corrupt file is kept aside, not trusted', () => {
 
 test('splits survive a save/load round trip; broken ones are dropped', () => {
   const s = emptySaved()
+  s.favorites = [] // split indexes below count Today tabs only
   s.spaces[0].today = ['a', 'b', 'c'].map((u) => ({
     kind: 'tab' as const,
     url: `https://${u}`,
