@@ -4,6 +4,7 @@ import { Archive, ArrowLeft, ArrowRight, PanelLeft, RotateCw, X } from 'lucide-r
 import { EMPTY_STATE, type BrowserState, type SiteInfo, type TabState } from '../../shared/ipc'
 import {
   PAGE_INSET,
+  pageTop,
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH
@@ -91,12 +92,14 @@ export default function App(): React.JSX.Element {
           />
         </AnimatePresence>
         <PageArea state={state} />
+        {/* A strip above the page card to drag the window by (the caption-button row on Windows). */}
+        <div className="drag absolute inset-x-0 top-0" style={{ height: pageTop(platform) }} />
         <motion.aside
           initial={false}
           animate={{ x: hidden ? -(sidebar.width + PAGE_INSET) : 0 }}
           transition={{ duration: 0.18, ease: 'easeOut' }}
           aria-label="Sidebar"
-          className="absolute inset-y-0 left-0 flex flex-col gap-2 px-2"
+          className="drag absolute inset-y-0 left-0 flex flex-col gap-2 px-2"
           style={{ width: sidebar.width }}
           onWheel={onWheel}
           onMouseLeave={() => {

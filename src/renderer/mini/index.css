@@ -14,6 +14,9 @@ body,
     system-ui,
     sans-serif;
   user-select: none;
+}
+/* Only the toolbar strip drags the window; the page view below it must get its clicks. */
+.drag {
   -webkit-app-region: drag;
 }
 button {

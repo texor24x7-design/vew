@@ -230,7 +230,7 @@ export function Tabs({ state }: { state: BrowserState }): React.JSX.Element {
         <DropCtx.Provider value={drop}>
           <Favorites tabs={state.favorites} dragging={dragged !== null} />
           <PageDrop state={state} />
-          <div className="-mx-2 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
+          <div className="no-drag -mx-2 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
             <Zone
               zone="pinned"
               count={state.pinned.length}

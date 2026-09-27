@@ -15,13 +15,22 @@ body,
     system-ui,
     sans-serif;
   user-select: none;
-  -webkit-app-region: drag;
 }
 
+/*
+ * Window-drag areas: the sidebar's background and a strip along the top only. Never the whole document:
+ * drag regions are window-level, so one under the page card would swallow real clicks on the page.
+ */
+.drag {
+  -webkit-app-region: drag;
+}
 button,
 input,
+select,
+a,
 li,
 [role='button'],
+[role='separator'],
 .no-drag {
   -webkit-app-region: no-drag;
 }

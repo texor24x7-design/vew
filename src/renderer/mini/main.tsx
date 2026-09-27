@@ -16,7 +16,7 @@ function Toolbar(): React.JSX.Element {
   useEffect(() => vew.onInfo(setInfo), [])
   return (
     <div
-      className={`flex h-full items-center gap-2 bg-neutral-100 text-[13px] text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100 ${
+      className={`drag flex h-10 items-center gap-2 bg-neutral-100 text-[13px] text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100 ${
         platform === 'darwin' ? 'pr-2 pl-20' : 'pr-36 pl-3' // traffic lights / caption buttons
       }`}
     >
