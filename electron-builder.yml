@@ -47,7 +47,7 @@ mac:
     NSMicrophoneUsageDescription: Websites you allow can use your microphone, for example for Talk calls.
     NSLocationWhenInUseUsageDescription: Websites you allow can see your approximate location.
 dmg:
-  artifactName: Vew-${version}-mac.${ext}
+  artifactName: Vew-mac.${ext} # versionless: the website links to releases/latest/download/Vew-mac.dmg
 
 win:
   target:
@@ -55,7 +55,7 @@ win:
       arch: [x64, arm64]
   executableName: Vew
 nsis:
-  artifactName: Vew-${version}-win-${arch}-setup.${ext}
+  artifactName: Vew-win-${arch}-setup.${ext} # Vew-win-setup.exe (both archs), Vew-win-x64-setup.exe, …
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true

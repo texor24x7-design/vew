@@ -28,7 +28,7 @@ export function FindBar(): React.JSX.Element | null {
   return (
     <div
       role="search"
-      className="fixed inset-0 flex items-center gap-1 rounded-xl bg-white/95 pr-1.5 pl-3 text-[13px] text-neutral-900 shadow-lg ring-1 ring-black/10 backdrop-blur dark:bg-neutral-800/95 dark:text-neutral-100 dark:ring-white/10"
+      className="fixed inset-0 flex items-center gap-1 rounded-xl bg-white pr-1.5 pl-3 text-[13px] text-neutral-900 shadow-lg ring-1 ring-black/10 dark:bg-neutral-800 dark:text-neutral-100 dark:ring-white/10"
     >
       <input
         ref={input}

@@ -331,7 +331,7 @@ export function Palette(): React.JSX.Element {
                     setOpen(false)
                   }
                 }}
-                className="overflow-hidden rounded-[14px] bg-white/95 text-[13px] text-neutral-900 shadow-2xl ring-1 ring-black/10 backdrop-blur-xl dark:bg-neutral-900/95 dark:text-neutral-100 dark:ring-white/10"
+                className="overflow-hidden rounded-[14px] bg-white text-[13px] text-neutral-900 shadow-2xl ring-1 ring-black/10 dark:bg-neutral-900 dark:text-neutral-100 dark:ring-white/10"
               >
                 <Command.Input
                   autoFocus

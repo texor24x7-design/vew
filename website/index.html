@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'"
+    />
+    <title>Vew by Texor: the calm browser for focused work</title>
+    <meta
+      name="description"
+      content="Vew is the sidebar-first browser for the Texor family. Spaces, a command bar for everything, split view and your Texor Account built in. Free for macOS and Windows."
+    />
+    <meta name="theme-color" content="#f6f7fa" />
+    <link rel="icon" href="assets/brand/vew-mark.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="assets/brand/apple-touch-icon.png" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Vew by Texor" />
+    <meta property="og:title" content="Vew: browse, focus, flow." />
+    <meta
+      property="og:description"
+      content="The sidebar-first browser for the Texor family. Free for macOS and Windows."
+    />
+    <meta property="og:image" content="assets/og.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link
+      rel="preload"
+      href="assets/fonts/plus-jakarta-sans-latin-wght-normal.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="main.js" defer></script>
+  </head>
+  <body>
+    <div class="lp">
+      <header class="lp__header">
+        <div class="lp__header-inner">
+          <a class="lp__brand" href="#top" aria-label="Vew by Texor, home">
+            <img src="assets/brand/vew-mark.svg" alt="" width="44" height="44" />
+            <span class="lp__brand-text"><small>Texor</small><b>VEW</b></span>
+          </a>
+          <nav class="lp__nav" aria-label="Main">
+            <a href="#features">Features</a>
+            <a href="#spaces">Spaces</a>
+            <a href="#security">Security</a>
+            <a href="#faq">FAQ</a>
+          </nav>
+          <div class="lp__actions">
+            <a class="lp__signin" href="https://accounts.texor.app/">Texor Account</a>
+            <a class="lp__cta" href="#download" data-download="auto">Download</a>
+          </div>
+        </div>
+      </header>
+
+      <main id="top">
+        <section class="lp__hero">
+          <a class="lp__family" href="https://accounts.texor.app/">
+            <img src="assets/brand/texor.svg" alt="Texor" width="72" height="21" />
+            <span>One account, every product</span>
+          </a>
+          <h1 class="lp__title">Browse. Focus. <span class="lp__accent">Flow.</span></h1>
+          <p class="lp__sub">
+            Vew is the sidebar-first browser for the Texor family. Spaces for every part of your
+            day, a command bar for everything, and your Texor Account built in.
+          </p>
+          <div class="lp__downloads" id="hero-downloads">
+            <a class="lp__btn lp__btn--primary" data-download="mac" href="#download">
+              <svg class="lp__os" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M16.4 12.6c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9-.7 0-1.8-.8-3-.8-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7c1.3 0 2.1-1.1 2.8-2.3.9-1.3 1.3-2.6 1.3-2.6s-2.5-1-2.5-3.8ZM14.1 5.8c.6-.8 1.1-1.8 1-2.8-.9 0-2 .6-2.7 1.4-.6.7-1.1 1.7-1 2.7 1 .1 2-.5 2.7-1.3Z"
+                />
+              </svg>
+              Download for macOS
+            </a>
+            <a class="lp__btn lp__btn--ghost" data-download="win" href="#download">
+              <svg class="lp__os" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M3 5.5 10.4 4.5v7H3v-6Zm0 13 7.4 1v-7H3v6Zm8.2 1.1L21 21v-8.5h-9.8v7.1Zm0-15.2v7.1H21V3l-9.8 1.4Z"
+                />
+              </svg>
+              Download for Windows
+            </a>
+          </div>
+          <p class="lp__meta">
+            Free · Built on Chromium · macOS (Apple silicon &amp; Intel) · Windows 10 &amp; 11 (x64
+            &amp; ARM)
+          </p>
+          <p class="lp__notice" role="status" aria-live="polite" hidden></p>
+
+          <figure class="lp__shot lp__shot--hero reveal">
+            <span class="lp__wash" aria-hidden="true"></span>
+            <img
+              src="assets/screens/hero.webp"
+              width="2400"
+              height="1227"
+              alt="Vew showing Texor Talk, with the sidebar holding Texor favorites, a pinned Q4 launch folder and today's tabs"
+              fetchpriority="high"
+            />
+            <span class="lp__chip lp__chip--left"
+              ><kbd>⌘</kbd><kbd>T</kbd> Command bar for everything</span
+            >
+            <span class="lp__chip lp__chip--right"><i class="dot"></i> Signed in with Texor</span>
+          </figure>
+        </section>
+
+        <section class="lp__familyband" aria-labelledby="family-title">
+          <h2 id="family-title">One sign-in, the whole Texor family</h2>
+          <ul class="lp__apps">
+            <li>
+              <span class="tile"><img src="assets/brand/accounts.svg" alt="" /></span>Texor Account
+            </li>
+            <li>
+              <span class="tile"><img src="assets/brand/finvoice.svg" alt="" /></span>Finvoice
+            </li>
+            <li>
+              <span class="tile"><img src="assets/brand/talk.svg" alt="" /></span>Talk
+            </li>
+            <li>
+              <span class="tile"><img src="assets/brand/notes.svg" alt="" /></span>Notes
+            </li>
+          </ul>
+        </section>
+
+        <section class="lp__strip" id="features">
+          <ul class="lp__features">
+            <li class="lp__feature lp__feature--red reveal">
+              <span class="lp__feature-tile" aria-hidden="true"
+                ><svg viewBox="0 0 24 24">
+                  <path
+                    d="M4 3h5a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Zm8 0h8a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1h-8V3Zm-7 4v2h3V7H5Zm0 4v2h3v-2H5Z"
+                  /></svg
+              ></span>
+              <strong>A sidebar, not a tab strip</strong>
+              <span
+                >Favorites, pinned folders and today's tabs, all in one calm column you can
+                collapse.</span
+              >
+            </li>
+            <li class="lp__feature lp__feature--amber reveal">
+              <span class="lp__feature-tile" aria-hidden="true"
+                ><svg viewBox="0 0 24 24">
+                  <path d="M3 4h8v7H3V4Zm10 0h8v4h-8V4Zm0 6h8v10h-8V10ZM3 13h8v7H3v-7Z" /></svg
+              ></span>
+              <strong>Spaces with their own logins</strong>
+              <span
+                >Work and personal side by side, each with its own theme, tabs and cookies.</span
+              >
+            </li>
+            <li class="lp__feature lp__feature--green reveal">
+              <span class="lp__feature-tile" aria-hidden="true"
+                ><svg viewBox="0 0 24 24">
+                  <path
+                    d="M10.5 3a7.5 7.5 0 0 1 6 12l4.3 4.3-1.5 1.5-4.3-4.3A7.5 7.5 0 1 1 10.5 3Zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11Z"
+                  /></svg
+              ></span>
+              <strong>A command bar for everything</strong>
+              <span>Tabs, history, actions and search in one box, instant as you type.</span>
+            </li>
+            <li class="lp__feature lp__feature--teal reveal">
+              <span class="lp__feature-tile" aria-hidden="true"
+                ><svg viewBox="0 0 24 24"><path d="M3 4h8v16H3V4Zm10 0h8v16h-8V4Z" /></svg
+              ></span>
+              <strong>Split view &amp; Peek</strong>
+              <span
+                >Up to four pages side by side, and links that float over the page until you need
+                them.</span
+              >
+            </li>
+          </ul>
+        </section>
+
+        <section class="lp__row reveal">
+          <div class="lp__row-copy">
+            <p class="lp__eyebrow">Command bar</p>
+            <h2>Everything is one keystroke away</h2>
+            <p>
+              Press <kbd>⌘</kbd><kbd>T</kbd> (or <kbd>Ctrl</kbd><kbd>T</kbd>) and type. Vew searches
+              every open tab in every Space, your pinned pages, your history and its own actions,
+              and answers before you finish the word.
+            </p>
+            <ul class="lp__ticks">
+              <li>Switch to a tab instead of opening a duplicate</li>
+              <li>Copy the URL, toggle dark mode, open a new Space</li>
+              <li>Search suggestions from the engine you choose</li>
+            </ul>
+          </div>
+          <figure class="lp__shot">
+            <img
+              src="assets/screens/command-bar.webp"
+              width="2400"
+              height="1227"
+              loading="lazy"
+              alt="The Vew command bar open over a page, matching tabs, favorites, suggestions and actions for “fin”"
+            />
+          </figure>
+        </section>
+
+        <section class="lp__row lp__row--flip reveal">
+          <div class="lp__row-copy">
+            <p class="lp__eyebrow">Split view</p>
+            <h2>Two pages, one glance</h2>
+            <p>
+              Drag a tab onto the page to split it. Put the invoice next to the notes, the doc next
+              to the call, and drag the divider to taste. Splits come back after a restart.
+            </p>
+            <ul class="lp__ticks">
+              <li>Two to four panes, side by side or stacked</li>
+              <li>Peek opens links from pinned tabs in a floating card</li>
+              <li>A small window for links from other apps</li>
+            </ul>
+          </div>
+          <figure class="lp__shot">
+            <img
+              src="assets/screens/split-view.webp"
+              width="2400"
+              height="1227"
+              loading="lazy"
+              alt="Vew in split view with Texor Finvoice on the left and Texor Notes on the right"
+            />
+          </figure>
+        </section>
+
+        <section class="lp__row reveal" id="spaces">
+          <div class="lp__row-copy">
+            <p class="lp__eyebrow">Spaces</p>
+            <h2>A Space for every part of your day</h2>
+            <p>
+              Give each Space a name, an icon and a gradient. Link it to its own profile and it
+              keeps separate cookies and logins, so a second work account never logs out the first.
+            </p>
+            <ul class="lp__ticks">
+              <li>Swipe or press a key to switch; the whole sidebar slides</li>
+              <li>Light and dark follow your system</li>
+              <li>Today's tabs tidy themselves into the Archive</li>
+            </ul>
+          </div>
+          <figure class="lp__shot">
+            <img
+              src="assets/screens/dark-studio.webp"
+              width="2400"
+              height="1227"
+              loading="lazy"
+              alt="Vew in dark mode with a deep blue Studio Space open on Texor Notes"
+            />
+          </figure>
+        </section>
+
+        <section class="lp__row lp__row--flip reveal">
+          <div class="lp__row-copy">
+            <p class="lp__eyebrow">Texor Account</p>
+            <h2>Sign in once. Every Texor app follows.</h2>
+            <p>
+              Vew uses your Texor Account the way a browser should: sign in when you set it up and
+              Finvoice, Talk and Notes open signed in. Sign out and they sign out too. It's
+              optional: Vew works fully without an account.
+            </p>
+            <ul class="lp__ticks">
+              <li>One account per profile, so work and personal stay apart</li>
+              <li>Texor apps one click away from the sidebar</li>
+              <li>Your sign-in stored in your system keychain</li>
+            </ul>
+          </div>
+          <figure class="lp__shot">
+            <img
+              src="assets/screens/onboarding.webp"
+              width="2400"
+              height="1227"
+              loading="lazy"
+              alt="Vew's welcome screen offering Sign in with Texor over an ocean video"
+            />
+          </figure>
+        </section>
+
+        <section class="lp__section" id="security">
+          <header class="lp__section-head">
+            <p class="lp__eyebrow">Security &amp; privacy</p>
+            <h2>Built for work that matters</h2>
+            <p>
+              The same engine as the world's most-used browser, with the guard rails switched on.
+            </p>
+          </header>
+          <ul class="lp__grid">
+            <li class="lp__card reveal">
+              <strong>Chromium, kept current</strong
+              ><span
+                >Every page renders in Chromium. Vew tracks the latest stable release and updates
+                itself in the background.</span
+              >
+            </li>
+            <li class="lp__card reveal">
+              <strong>Every site sandboxed</strong
+              ><span
+                >Each page runs in a sandboxed process with no access to your files or to Vew
+                itself.</span
+              >
+            </li>
+            <li class="lp__card reveal">
+              <strong>Trackers blocked</strong
+              ><span
+                >Ads and trackers are blocked out of the box, with a per-site switch when you need
+                it.</span
+              >
+            </li>
+            <li class="lp__card reveal">
+              <strong>You decide what sites can use</strong
+              ><span
+                >Camera, microphone, location and notifications are asked for per site and easy to
+                take back.</span
+              >
+            </li>
+            <li class="lp__card reveal">
+              <strong>Profiles that never mix</strong
+              ><span
+                >Each profile has its own cookies, storage and logins, isolated from the
+                others.</span
+              >
+            </li>
+            <li class="lp__card reveal">
+              <strong>Encrypted on your device</strong
+              ><span
+                >Cookies are encrypted with your operating system's keys. Your history stays on your
+                computer.</span
+              >
+            </li>
+          </ul>
+        </section>
+
+        <section class="lp__global" aria-label="Where Vew runs">
+          <ul>
+            <li><strong>macOS &amp; Windows</strong><span>One browser on every desk</span></li>
+            <li>
+              <strong>Apple silicon, Intel, ARM</strong><span>Native on the hardware you have</span>
+            </li>
+            <li>
+              <strong>Chrome extensions</strong><span>Install from the Chrome Web Store</span>
+            </li>
+            <li>
+              <strong>Moves in with you</strong><span>Import from Chrome, Arc, Brave and Edge</span>
+            </li>
+          </ul>
+        </section>
+
+        <section class="lp__band" id="download">
+          <header class="lp__section-head">
+            <h2>Get Vew in three steps</h2>
+          </header>
+          <ol class="lp__steps">
+            <li>
+              <span class="lp__step-no">1</span><strong>Download</strong
+              ><span>Free for macOS and Windows. One installer, made for your computer.</span>
+            </li>
+            <li>
+              <span class="lp__step-no">2</span><strong>Sign in with Texor</strong
+              ><span>Optional. Your Texor apps come along, signed in.</span>
+            </li>
+            <li>
+              <span class="lp__step-no">3</span><strong>Make it yours</strong
+              ><span>Pick a theme, bring your bookmarks, and start browsing.</span>
+            </li>
+          </ol>
+          <div class="lp__platforms">
+            <div class="lp__platform" data-platform="mac">
+              <svg class="lp__platform-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M16.4 12.6c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9-.7 0-1.8-.8-3-.8-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7c1.3 0 2.1-1.1 2.8-2.3.9-1.3 1.3-2.6 1.3-2.6s-2.5-1-2.5-3.8ZM14.1 5.8c.6-.8 1.1-1.8 1-2.8-.9 0-2 .6-2.7 1.4-.6.7-1.1 1.7-1 2.7 1 .1 2-.5 2.7-1.3Z"
+                />
+              </svg>
+              <strong>Vew for macOS</strong>
+              <span>Universal app for Apple silicon and Intel Macs</span>
+              <a class="lp__btn lp__btn--light" data-download="mac" href="#download"
+                >Download .dmg</a
+              >
+            </div>
+            <div class="lp__platform" data-platform="win">
+              <svg class="lp__platform-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M3 5.5 10.4 4.5v7H3v-6Zm0 13 7.4 1v-7H3v6Zm8.2 1.1L21 21v-8.5h-9.8v7.1Zm0-15.2v7.1H21V3l-9.8 1.4Z"
+                />
+              </svg>
+              <strong>Vew for Windows</strong>
+              <span>Windows 10 and 11. Picks x64 or ARM for you</span>
+              <a class="lp__btn lp__btn--light" data-download="win" href="#download"
+                >Download installer</a
+              >
+              <small
+                >Or get the <a data-download="win-x64" href="#download">x64</a> or
+                <a data-download="win-arm64" href="#download">ARM64</a> installer</small
+              >
+            </div>
+          </div>
+          <p class="lp__all">
+            <a data-download="releases" href="#download">All releases and release notes</a>
+          </p>
+        </section>
+
+        <section class="lp__section lp__faq" id="faq">
+          <header class="lp__section-head"><h2>Questions, answered</h2></header>
+          <div class="lp__faq-list">
+            <details>
+              <summary>Is Vew free?</summary>
+              <p>Yes. Vew is free to download and use on macOS and Windows.</p>
+            </details>
+            <details>
+              <summary>Do I need a Texor Account?</summary>
+              <p>
+                No. Vew works fully without one. Signing in simply means Finvoice, Talk, Notes and
+                every other Texor app open already signed in.
+              </p>
+            </details>
+            <details>
+              <summary>Which engine does Vew use?</summary>
+              <p>
+                Chromium, the open-source engine behind Chrome and Edge. Sites work in Vew the way
+                they work there, and Vew updates to new Chromium releases automatically.
+              </p>
+            </details>
+            <details>
+              <summary>Can I bring my bookmarks and history?</summary>
+              <p>
+                Yes. The first-run setup imports bookmarks and history from Chrome, Arc, Brave and
+                Edge in a couple of clicks.
+              </p>
+            </details>
+            <details>
+              <summary>Does Vew support extensions?</summary>
+              <p>
+                Yes. Install extensions from the Chrome Web Store or load an unpacked one from
+                Settings; their icons sit in the sidebar.
+              </p>
+            </details>
+            <details>
+              <summary>Where is my data stored?</summary>
+              <p>
+                On your computer. History, tabs and settings live in Vew's folder on your device,
+                cookies are encrypted with your operating system's keys, and your Texor sign-in is
+                kept in your system keychain.
+              </p>
+            </details>
+          </div>
+        </section>
+      </main>
+
+      <footer class="lp__foot">
+        <a href="https://accounts.texor.app/" class="lp__foot-brand"
+          ><img src="assets/brand/texor.svg" alt="Texor" width="82" height="24"
+        /></a>
+        <p>Vew is part of Texor. One account signs you in to every product in the family.</p>
+        <nav aria-label="Footer">
+          <a href="#features">Features</a>
+          <a href="#security">Security</a>
+          <a data-download="releases" href="#download">Releases</a>
+          <a href="https://accounts.texor.app/">Texor Account</a>
+        </nav>
+        <small>© 2026 Texor</small>
+      </footer>
+    </div>
+  </body>
+</html>
