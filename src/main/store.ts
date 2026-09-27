@@ -62,7 +62,7 @@ export const DEFAULT_PROFILE: Profile = { id: 'default', name: 'Personal' }
 
 export const newSavedSpace = (overrides: Partial<SavedSpace> = {}): SavedSpace => ({
   name: 'Personal',
-  icon: '🏠',
+  icon: 'icon:House',
   theme: DEFAULT_THEME,
   profileId: DEFAULT_PROFILE.id,
   pinned: [],
@@ -163,7 +163,7 @@ export function sanitize(v: unknown): Saved {
     s.spaces = v.spaces.filter(isObj).map((sp) =>
       newSavedSpace({
         name: text(sp.name, 'Space').slice(0, 100),
-        icon: text(sp.icon, '✨').slice(0, 16),
+        icon: text(sp.icon, '✨').slice(0, 40),
         theme: isTheme(sp.theme) ? sp.theme : DEFAULT_THEME,
         profileId: profileIds.has(sp.profileId as string) ? (sp.profileId as string) : 'default',
         pinned: nodes(sp.pinned),

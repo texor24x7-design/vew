@@ -9,6 +9,7 @@ import type {
   PaletteTab
 } from '../../shared/ipc'
 import { rank, searchable, type Searchable } from '../../shared/fuzzy'
+import { iconText } from '../../shared/theme'
 import { displayHost, looksLikeUrl } from '../../shared/url'
 import type { OverlayApi } from '../../preload/overlay'
 import { Favicon, icon } from '../shared/ui'
@@ -178,7 +179,7 @@ function tabRow(t: PaletteTab, activeSpaceId: number): Row {
     value: `tab-${t.id}`,
     title: t.title,
     subtitle: elsewhere
-      ? `${t.spaceIcon} ${t.spaceName} · ${displayHost(t.url)}`
+      ? `${[iconText(t.spaceIcon), t.spaceName].filter(Boolean).join(' ')} · ${displayHost(t.url)}`
       : displayHost(t.url),
     hint: t.active ? 'Current tab' : 'Switch to tab',
     lead: <Favicon tab={t} />,

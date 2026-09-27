@@ -128,7 +128,17 @@ const texorIcon = (id: string): Electron.NativeImage =>
 const SIDEBAR_ANIM_MS = 180
 const isMac = process.platform === 'darwin'
 /** Default icons for new Spaces, so they're distinguishable in the switcher before being customized. */
-const SPACE_ICONS = ['🏠', '💼', '🌿', '🔥', '🌊', '🎨', '📚', '🚀', '⭐️']
+const SPACE_ICONS = [
+  'House',
+  'Briefcase',
+  'Sprout',
+  'Flame',
+  'Waves',
+  'Palette',
+  'BookOpen',
+  'Rocket',
+  'Star'
+].map((name) => `icon:${name}`)
 
 /** Search suggestions from the chosen engine. */
 async function suggest(query: string): Promise<string[]> {

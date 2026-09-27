@@ -139,3 +139,8 @@ export function stopsFor(theme: Theme, systemDark: boolean, intensity: number): 
   const base = systemDark ? BASE_DARK : BASE_LIGHT
   return theme.colors.map((c) => over(rgb(c), base, intensity))
 }
+
+/** Space icons are an emoji, or `icon:<Name>` from the icon library (src/renderer/shared/spaceIcons.tsx). */
+export const ICON_PREFIX = 'icon:'
+/** A Space icon as plain text, for native menus and text: emoji only. */
+export const iconText = (icon: string): string => (icon.startsWith(ICON_PREFIX) ? '' : icon)

@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { BrowserWindow, ipcMain, Menu, WebContentsView, type IpcMainEvent } from 'electron'
 import { IPC, isMiniAction, type MiniAction, type MiniInfo } from '../shared/ipc'
 import { WIN_TITLEBAR_HEIGHT } from '../shared/layout'
+import { iconText } from '../shared/theme'
 import { sessionFor } from './profiles'
 import { history } from './history'
 import { closeView, load, loadPage, secureWebPreferences, type VewWindow } from './window'
@@ -101,7 +102,7 @@ export class MiniWindow {
     if (action === 'close') return this.win.close()
     const main = this.main()
     const items = main.spaceList.map((sp) => ({
-      label: `${sp.icon}  ${sp.name}`,
+      label: [iconText(sp.icon), sp.name].filter(Boolean).join('  '),
       click: () => {
         this.moved = true
         this.win.contentView.removeChildView(this.page)

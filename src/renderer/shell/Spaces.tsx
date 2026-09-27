@@ -1,7 +1,8 @@
-import { useRef, useSyncExternalStore } from 'react'
+import { useRef, useState, useSyncExternalStore } from 'react'
 import { Minus, Plus } from 'lucide-react'
 import type { BrowserState, SpaceState } from '../../shared/ipc'
-import { PRESETS, palette, type Palette, type Theme } from '../../shared/theme'
+import { ICON_PREFIX, PRESETS, palette, type Palette, type Theme } from '../../shared/theme'
+import { ICON_GROUPS, SpaceIcon } from '../shared/spaceIcons'
 import { icon } from '../shared/ui'
 
 const { send } = window.vew
@@ -77,7 +78,7 @@ export function SpaceSwitcher(props: {
                 send({ type: 'spaceMenu', id: sp.id })
               }}
             >
-              {sp.icon}
+              <SpaceIcon icon={sp.icon} />
             </button>
           )
         })}
@@ -98,6 +99,151 @@ const field =
   'h-8 rounded-md bg-white/75 px-2 text-neutral-900 outline-none ring-1 ring-black/10 focus:ring-blue-500 dark:bg-neutral-800/80 dark:text-neutral-100 dark:ring-white/10'
 const label = 'text-[12px] font-medium text-(--muted)'
 
+const EMOJI = [
+  '🏠',
+  '💼',
+  '🚀',
+  '🔥',
+  '🌊',
+  '🌿',
+  '🎨',
+  '📚',
+  '⭐️',
+  '🎮',
+  '🎧',
+  '🎬',
+  '🍕',
+  '☕️',
+  '🧠',
+  '💡',
+  '🧪',
+  '💻',
+  '📈',
+  '💰',
+  '🛒',
+  '✈️',
+  '🏝️',
+  '🏔️',
+  '🌙',
+  '☀️',
+  '🌈',
+  '❄️',
+  '🐶',
+  '🐱',
+  '🦊',
+  '🐙',
+  '👾',
+  '🤖',
+  '👻',
+  '💎',
+  '👑',
+  '🏆',
+  '⚡️',
+  '❤️',
+  '🌸',
+  '🍀'
+]
+/** "ChartLine" → "Chart line" */
+const words = (name: string): string =>
+  name.replace(/([a-z])([A-Z0-9])/g, '$1 $2').replace(/ (\w)/g, (m) => m.toLowerCase())
+
+/** The Space icon library (line icons by theme, searchable) and emoji. */
+function IconPicker(props: { value: string; onPick: (icon: string) => void }): React.JSX.Element {
+  const [tab, setTab] = useState<'icons' | 'emoji'>(
+    props.value.startsWith(ICON_PREFIX) ? 'icons' : 'emoji'
+  )
+  const [query, setQuery] = useState('')
+  const q = query.trim().toLowerCase()
+  const groups = ICON_GROUPS.map((g) => ({
+    name: g.name,
+    names: Object.keys(g.icons).filter(
+      (n) => !q || words(n).toLowerCase().includes(q) || g.name.toLowerCase().includes(q)
+    )
+  })).filter((g) => g.names.length)
+  const cell = (selected: boolean): string =>
+    `grid size-8 place-items-center rounded-md ${selected ? 'bg-(--active) shadow-sm' : 'hover:bg-(--hover)'}`
+
+  return (
+    <section className="flex flex-col gap-2 rounded-xl bg-(--fill) p-2" aria-label="Space icon">
+      <div role="tablist" className="flex gap-1">
+        {(['icons', 'emoji'] as const).map((t) => (
+          <button
+            key={t}
+            role="tab"
+            aria-selected={tab === t}
+            className={`h-7 flex-1 rounded-md text-[12px] ${tab === t ? 'bg-(--active) font-medium shadow-sm' : 'text-(--muted) hover:bg-(--hover)'}`}
+            onClick={() => setTab(t)}
+          >
+            {t === 'icons' ? 'Icons' : 'Emoji'}
+          </button>
+        ))}
+      </div>
+      {tab === 'icons' ? (
+        <>
+          <input
+            type="search"
+            className={field}
+            placeholder="Search icons"
+            aria-label="Search icons"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <div className="flex max-h-60 flex-col gap-2 overflow-y-auto">
+            {groups.map((g) => (
+              <div key={g.name} role="group" aria-label={g.name}>
+                <div className={`${label} px-1 pb-1`}>{g.name}</div>
+                <div className="grid grid-cols-[repeat(auto-fill,2rem)] justify-between gap-0.5">
+                  {g.names.map((n) => {
+                    const value = ICON_PREFIX + n
+                    return (
+                      <button
+                        key={n}
+                        className={cell(props.value === value)}
+                        aria-label={words(n)}
+                        aria-pressed={props.value === value}
+                        title={words(n)}
+                        onClick={() => props.onPick(value)}
+                      >
+                        <SpaceIcon icon={value} />
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+            {!groups.length && (
+              <p className="px-1 py-2 text-[12px] text-(--muted)">No icons match “{query}”</p>
+            )}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="grid grid-cols-[repeat(auto-fill,2rem)] justify-between gap-0.5">
+            {EMOJI.map((e) => (
+              <button
+                key={e}
+                className={`${cell(props.value === e)} text-[15px]`}
+                aria-label={e}
+                aria-pressed={props.value === e}
+                onClick={() => props.onPick(e)}
+              >
+                {e}
+              </button>
+            ))}
+          </div>
+          <input
+            className={field}
+            placeholder="Or type any emoji"
+            aria-label="Custom emoji"
+            maxLength={16}
+            onChange={(e) => e.target.value.trim() && props.onPick(e.target.value.trim())}
+          />
+        </>
+      )}
+    </section>
+  )
+}
+
 /** Edits the active Space. Every change applies immediately, so the sidebar itself is the live preview. */
 export function SpaceEditor(props: {
   space: SpaceState
@@ -109,6 +255,7 @@ export function SpaceEditor(props: {
     send({ type: 'updateSpace', id: space.id, ...patch })
   const setTheme = (patch: Partial<Theme>): void => update({ theme: { ...space.theme, ...patch } })
   const effective = palette(space.theme, darkQuery.matches).intensity
+  const [picking, setPicking] = useState(false)
 
   return (
     <div
@@ -123,12 +270,14 @@ export function SpaceEditor(props: {
       </div>
 
       <div className="flex gap-2">
-        <input
-          className={`${field} w-11 text-center text-[15px]`}
-          defaultValue={space.icon}
-          aria-label="Space icon (emoji)"
-          onChange={(e) => e.target.value.trim() && update({ icon: e.target.value })}
-        />
+        <button
+          className={`${field} grid w-11 place-items-center ${picking ? 'ring-2 ring-blue-500' : ''}`}
+          aria-label="Choose Space icon"
+          aria-expanded={picking}
+          onClick={() => setPicking(!picking)}
+        >
+          <SpaceIcon icon={space.icon} />
+        </button>
         <input
           className={`${field} min-w-0 flex-1`}
           defaultValue={space.name}
@@ -136,6 +285,8 @@ export function SpaceEditor(props: {
           onChange={(e) => e.target.value.trim() && update({ name: e.target.value })}
         />
       </div>
+
+      {picking && <IconPicker value={space.icon} onPick={(i) => update({ icon: i })} />}
 
       <section className="flex flex-col gap-2">
         <span className={label}>Theme</span>

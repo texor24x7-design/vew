@@ -490,7 +490,7 @@ const validators: { [K in Command['type']]: (c: Record<string, unknown>) => bool
   updateSpace: (c) =>
     int(c.id) &&
     opt(c.name, (v) => str(v, 100)) &&
-    opt(c.icon, (v) => str(v, 16)) &&
+    opt(c.icon, (v) => str(v, 40)) &&
     opt(c.theme, isTheme) &&
     opt(c.profileId, (v) => str(v, 100)),
   newProfile: (c) => int(c.spaceId),
